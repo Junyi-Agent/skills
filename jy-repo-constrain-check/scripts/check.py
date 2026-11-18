@@ -124,17 +124,19 @@ ADR_DIR_NAMES = {
 ADR_FILE = re.compile(r"(?i)^(adr[-_ ]?\d+|\d{3,4}[-_]).*\.md$")
 STATUS_LINE = re.compile(r"(?i)^\s*[-*]?\s*\**(status|状态)\**\s*[:：]\s*(.+)$")
 STATUS_HEAD = re.compile(r"(?i)^#+\s*(status|状态)\s*$")
-TESTED = re.compile(r"(?i)tested|verified|validated|已测试|已验证|实测|测试过|已采纳|采纳")
-UNTESTED = re.compile(
-    r"(?i)proposed|draft|untested|unverified|未测试|未验证|待验证|提议|草案|待定|实验"
+# 三种状态：提议 = 只写了文档；采纳 = 允许实现（可能已实现）；已验证 = 人类测试过代码并确认
+VERIFIED = re.compile(
+    r"(?i)(?<!un)(verified|validated|tested)|(?<![未待])(已验证|已测试|实测|测试过)"
 )
-DEFINE_TEST = re.compile(
-    r"(?i)(已采纳|accepted|adopted).{0,40}(测试|验证|tested|verified)|(测试|验证|tested|verified).{0,40}(已采纳|accepted|adopted)"
+ACCEPTED = re.compile(r"(?i)accepted|adopted|采纳")
+PROPOSED = re.compile(r"(?i)proposed|draft|提议|草案|待定")
+DEFINE_VERIFIED = re.compile(
+    r"(?i)(已验证|verified).{0,40}(人|human|测试|tested)|(人|human).{0,20}(测试|tested).{0,40}(已验证|verified)"
 )
 
 
 def check_adr(root: Path) -> Section:
-    s = Section(1, "ADR，且区分已实测采纳 / 未测试")
+    s = Section(1, "ADR，状态区分提议 / 采纳 / 已验证")
     adr_dirs, adr_files = set(), []
     for p in walk(root):
         if p.suffix.lower() != ".md":
@@ -182,25 +184,28 @@ def check_adr(root: Path) -> Section:
             f"没有状态字段的 ADR {len(no_status)} 篇：{', '.join(no_status[:5])}{' …' if len(no_status) > 5 else ''}"
         )
 
-    has_tested = any(TESTED.search(k) for k in statuses)
-    has_untested = any(UNTESTED.search(k) for k in statuses)
+    has_verified = any(VERIFIED.search(k) for k in statuses)
+    has_accepted = any(ACCEPTED.search(k) and not VERIFIED.search(k) for k in statuses)
+    has_proposed = any(PROPOSED.search(k) for k in statuses)
     for p in adr_files:
-        s.evidence += grep(root, p, DEFINE_TEST, limit=3)
+        s.evidence += grep(root, p, DEFINE_VERIFIED, limit=3)
     s.evidence = s.evidence[:6]
 
     if not statuses:
         s.verdict = "FAIL"
-        s.facts.append("所有 ADR 都没有状态字段，无法区分是否实测")
-    elif has_tested and has_untested:
-        s.verdict = "JUDGE"
-        s.judge.append(
-            "状态里同时有“已采纳/已验证”类和“提议/未测试”类。确认“已采纳”的定义是用户实际测试过，而不是“团队同意”"
+        s.facts.append("所有 ADR 都没有状态字段，无法区分提议 / 采纳 / 已验证")
+    elif not has_verified and not s.evidence:
+        s.verdict = "WARN"
+        seen = [n for n, f in (("提议", has_proposed), ("采纳", has_accepted)) if f]
+        s.facts.append(
+            f"状态只有{' / '.join(seen) or '其他取值'}，没有“已验证”（人类实测确认）这一档"
         )
     else:
-        s.verdict = "WARN" if not s.evidence else "JUDGE"
-        s.facts.append("状态取值只有一类，看不出实测和未测试的区分")
-        if s.evidence:
-            s.judge.append("证据里有“采纳 = 测试”的定义，确认它是否真的用在了状态字段上")
+        s.verdict = "JUDGE"
+        s.judge.append(
+            "确认三种状态都有定义：提议 = 只写了文档，采纳 = 允许实现，"
+            "已验证 = 人类测试了代码并确认；“已验证”不能由 agent 自己标"
+        )
     return s
 
 
@@ -417,6 +422,7 @@ def check_fmt_lint(root: Path, hooks: list[Path]) -> Section:
 
 AGENT_CALL = re.compile(
     r"(?i)\bclaude\s+(-p|--print)\b|\bclaude\b.*--output-format|\bcodex\s+exec\b|"
+    r"[\"']claude[\"']\s*,|"  # argv list: ["claude", "-p", ...]
     r"\bgemini\s+-p\b|anthropic|subagent|claude_agent_sdk|\bAgent\("
 )
 QUORUM = re.compile(r"(?i)-ge\s+2|>=\s*2|2\s*/\s*3|2 of 3|quorum|majority|approv|多数|同意|通过票")
@@ -644,11 +650,12 @@ CI_PATHS = [
     "cloudbuild.yaml",
     "cloudbuild.yml",
 ]
+CI_PRECOMMIT = re.compile(r"(?i)pre-commit run|pre-commit/action")
 CI_LINT = re.compile(
-    r"(?i)pre-commit run|\blint\b|ruff|eslint|flake8|mypy|pyright|clippy|golangci|shellcheck|biome|fmt --check|--check\b"
+    r"(?i)pre-commit run|pre-commit/action|\blint\b|ruff|eslint|flake8|mypy|pyright|clippy|golangci|shellcheck|biome|fmt --check|--check\b"
 )
 CI_TEST = re.compile(
-    r"(?i)pytest|unittest|\b(npm|pnpm|yarn|bun) (run )?test|cargo test|go test|\bmake test|ctest|jest|vitest|tox\b|nox\b"
+    r"(?i)pytest|unittest|\btest_\w+\.py\b|\w+_test\.py\b|\b(npm|pnpm|yarn|bun) (run )?test|cargo test|go test|\bmake test|ctest|jest|vitest|tox\b|nox\b"
 )
 CI_DEPLOY = re.compile(
     r"(?i)deploy|release|publish|docker push|gh release|twine upload|npm publish|helm upgrade|kubectl apply"
@@ -670,6 +677,11 @@ def check_ci(root: Path, remote: bool) -> Section:
         return s
     s.facts.append("CI 文件：" + ", ".join(rel(root, f) for f in files[:10]))
     text = "\n".join(read(f) for f in files)
+    pc = root / ".pre-commit-config.yaml"
+    if CI_PRECOMMIT.search(text) and pc.is_file():
+        # CI runs the pre-commit config, so its lint and test hooks run in CI too
+        text += "\n" + read(pc)
+        s.facts.append("CI 跑 pre-commit，.pre-commit-config.yaml 里的检查一并计入")
     has = {
         k: bool(r.search(text))
         for k, r in (

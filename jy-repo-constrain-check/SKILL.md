@@ -1,6 +1,6 @@
 ---
 name: "jy-repo-constrain-check"
-description: "快速只读检查一个 repo 有没有对开发流程的约束：ADR 是否区分已实测采纳和未测试、git + pre-commit 是否安装、pre-commit 是否有 formatter 和严格 linter、合并/push 前是否有 3 个 agent 审查且 ≥2 同意的门禁、文档是否规定新功能在目录外的 worktree 里做、是否用脚本强制流程、CI/CD 是否完善。用户说检查流程约束、constrain check、看看这个 repo 的流程规范、repo 有没有护栏时使用。"
+description: "快速只读检查一个 repo 有没有对开发流程的约束：ADR 状态是否区分提议/采纳/已验证、git + pre-commit 是否安装、pre-commit 是否有 formatter 和严格 linter、合并/push 前是否有 3 个 agent 审查且 ≥2 同意的门禁、文档是否规定新功能在目录外的 worktree 里做、是否用脚本强制流程、CI/CD 是否完善。用户说检查流程约束、constrain check、看看这个 repo 的流程规范、repo 有没有护栏时使用。"
 ---
 
 # Repo 流程约束检查
@@ -24,7 +24,12 @@ python3 <本 skill 目录>/scripts/check.py <repo 路径>
 
 只看脚本给出的证据片段，片段不够时再读对应文件的那几行，不要通读 repo。各项的合格标准：
 
-1. **ADR**：状态字段区分“用户实际测试过、已采纳”和“写了但没测过”。标准 ADR 的 Accepted 通常只表示团队同意，没有说明“采纳 = 实测”的定义时，算 WARN
+1. **ADR**：状态字段有这三种，且 repo 里写明了各自含义：
+   - **提议**（Proposed）：只写了 ADR 文档
+   - **采纳**（Accepted）：允许去实现，可能已经实现
+   - **已验证**（Verified）：人类测试了代码，确认了实现的内容
+
+   只有提议/采纳、没有“已验证”这一档时算 WARN（标准 ADR 的 Accepted 只表示同意实现，不代表实测过）。有“已验证”但没写明它要求人类实测时，也算 WARN
 2. **pre-commit 安装**：本机已安装，且 repo 里写了安装步骤（新机器、重建的 worktree 能装上）
 3. **formatter + 严格 linter**：两类都在 pre-commit 里，linter 开了严格模式，且没有 `--exit-zero`、`|| true` 之类的放宽
 4. **agent 审查门禁**：由已安装的 hook 触发、覆盖 worktree squash merge 后的 push；3 个 agent 的审查方向不同；≥2 同意才放行，否则非零退出阻止 push。缺任一条就不是 PASS，写明缺哪条
@@ -41,7 +46,7 @@ python3 <本 skill 目录>/scripts/check.py <repo 路径>
 ```
 | # | 检查项 | 结论 | 依据 |
 |---|---|---|---|
-| 1 | ADR 区分实测/未测 | ⚠️ | docs/adr/ 有 6 篇，状态只有 Accepted，没有实测的定义 |
+| 1 | ADR 提议/采纳/已验证 | ⚠️ | docs/adr/ 有 6 篇，状态只有 Proposed / Accepted，没有“已验证”这一档 |
 ...
 ```
 
