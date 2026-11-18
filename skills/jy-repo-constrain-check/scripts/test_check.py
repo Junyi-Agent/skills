@@ -249,5 +249,29 @@ class FilesUnderTest(unittest.TestCase):
         self.assertEqual(names, ["guard.py"])
 
 
+class CliTest(unittest.TestCase):
+    def run_cli(self, *args: str) -> subprocess.CompletedProcess[str]:
+        script = Path(check.__file__).resolve()
+        return subprocess.run(
+            [sys.executable, str(script), *args],
+            capture_output=True,
+            text=True,
+            env=CLEAN_ENV,
+            check=False,
+        )
+
+    def test_rejects_unknown_arguments(self):
+        for args in (["--no-remot"], ["-x"], [".", "extra"]):
+            r = self.run_cli(*args)
+            self.assertEqual(r.returncode, 2, args)
+            self.assertEqual(r.stdout, "", args)
+            self.assertIn("Usage", r.stderr, args)
+
+    def test_help(self):
+        r = self.run_cli("--help")
+        self.assertEqual(r.returncode, 0)
+        self.assertIn("Usage", r.stdout)
+
+
 if __name__ == "__main__":
     unittest.main()

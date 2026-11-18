@@ -39,11 +39,14 @@ for role in correctness design tests; do
 done
 [ "$ok" -ge 2 ] || { echo "only $ok approvals"; exit 1; }
 S
+# shellcheck disable=SC2016  # written literally into the fixture
 printf '#!/usr/bin/env bash\ngit worktree add "../$(basename $PWD)-$1" -b "$1" || exit 1\n' > scripts/new-worktree.sh
 printf '{"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":".claude/hooks/no-switch.sh"}]}]}}' > .claude/settings.json
 printf '#!/bin/sh\ngrep -q "git checkout\\|git switch" && { echo "{\\"decision\\": \\"block\\"}"; exit 2; }\n' > .claude/hooks/no-switch.sh
+# shellcheck disable=SC2016  # written literally into the fixture
 echo '每个新功能都在当前目录之外的 worktree 里做（`scripts/new-worktree.sh` 建到 ../ 下），不要在当前目录切换分支。' > CLAUDE.md
 cp CLAUDE.md AGENTS.md
+# shellcheck disable=SC2016  # written literally into the fixture
 printf '# good\n\n安装 hook：`pre-commit install --hook-type pre-commit --hook-type pre-push`\n' > README.md
 cat > .github/workflows/ci.yml <<'Y'
 on:

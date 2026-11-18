@@ -30,3 +30,10 @@ pre-commit install
 - evals 产物（`*-workspace/`、`evals/results/`）不提交。
 - 改 SKILL.md 的 description 会影响触发，改完跑一下对应 skill 的 evals。
 - 流程或架构决策写 ADR（`docs/adr/`）。状态分三种：提议 = 只写了文档；采纳 = 允许实现，可能已实现；已验证 = 人类测试了代码并确认。agent 最多改到「采纳」，「已验证」只由人类改。
+
+## 已知的故意设计
+
+审查（`/jy-repo-review`）不把下列行为当问题上报。
+
+- `git_guard.py` 对已删除文件的 `git checkout <file>` 按切分支拒绝：只有参数是已存在的路径、且不是 commit 时才当作恢复文件放行，拒绝信息给出 `git checkout -- <path>` 的写法（[[docs/adr/0001-worktree-and-git-guard]]）。
+- `git_guard.py` 拦不住 `export SKIP=...` 后单独 push、`eval`、脚本文件里的 git 命令；`git push --all` 带上 main 由服务端分支保护拦（ADR 0001、0003）。

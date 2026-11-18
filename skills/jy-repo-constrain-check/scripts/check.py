@@ -4,6 +4,7 @@
 Read-only: never writes, never runs hooks or tests. Stdlib only.
 
 Usage: check.py [repo_path] [--no-remote]
+Exits 2 on an unknown argument.
 
 Prints one markdown section per check with a preliminary verdict:
   PASS / WARN / FAIL   decided from the facts alone
@@ -971,9 +972,19 @@ def check_unix(root: Path) -> Section:
 
 
 def main() -> None:
-    args = [a for a in sys.argv[1:] if not a.startswith("--")]
+    argv = sys.argv[1:]
+    if "-h" in argv or "--help" in argv:
+        print(__doc__)
+        return
+    unknown = [a for a in argv if a.startswith("-") and a != "--no-remote"]
+    args = [a for a in argv if not a.startswith("-")]
+    if unknown or len(args) > 1:
+        bad = " ".join(unknown or args[1:])
+        print(f"check.py: unexpected argument: {bad}", file=sys.stderr)
+        print("Usage: check.py [repo_path] [--no-remote]", file=sys.stderr)
+        sys.exit(2)
     root = Path(args[0] if args else ".").resolve()
-    remote = "--no-remote" not in sys.argv
+    remote = "--no-remote" not in argv
     top = git(root, "rev-parse", "--show-toplevel")
     if top:
         root = Path(top)
