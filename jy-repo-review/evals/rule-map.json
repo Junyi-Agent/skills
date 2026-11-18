@@ -1,0 +1,34 @@
+{
+  "_kinds": "preference = 你的偏好或决定，模型变强也不会自己知道；practice = 通用做法，模型升级后可能默认就会做",
+  "full-review-kvs": {
+    "01-has-required-sections":                   {"rule": "第 4 步 REVIEW.md 的六部分结构", "kind": "preference"},
+    "02-confirms-delete-loses-data":              {"rule": "第 2 步 正确性组：逻辑 bug", "kind": "practice"},
+    "03-confirms-list-off-by-one":                {"rule": "第 2 步 正确性组：边界情况", "kind": "practice"},
+    "04-flags-weak-list-test":                    {"rule": "第 2 步 正确性组：测试质量", "kind": "practice"},
+    "05-flags-readme-flush-interval-drift":       {"rule": "第 2 步 一致性组：文档漂移", "kind": "practice"},
+    "06-flags-unused-human-size":                 {"rule": "第 2 步 清理组：死代码", "kind": "practice"},
+    "07-no-getattr-dispatch-false-positive":      {"rule": "第 3 步 死代码类检查动态调用", "kind": "practice"},
+    "08-fsync-classified-intentional-with-commit":{"rule": "第 3 步 查 git log 判断故意设计", "kind": "practice"},
+    "09-known-intentional-not-reported":          {"rule": "第 0 步 已知故意设计清单不再上报", "kind": "preference"},
+    "10-ambiguous-load-asked-as-question":        {"rule": "第 3 步 无文字依据归“无法判断”，第 4 步写成问题", "kind": "preference"},
+    "11-uncommitted-file-not-reviewed":           {"rule": "第 0 步 第 6 条 固定 commit，不审工作区", "kind": "preference"},
+    "12-baseline-records-pinned-commit":          {"rule": "第 4 步 基线记录固定的 commit", "kind": "preference"},
+    "13-reviewed-in-worktree":                    {"rule": "第 0 步 第 6 条 git worktree 拷贝并清理", "kind": "preference"},
+    "14-fresh-verifier-agents":                   {"rule": "第 3 步 新 agent 核实，不给审查者证据", "kind": "preference"},
+    "15-reproduced-correctness-finding":          {"rule": "第 3 步 第 5 条 正确性发现写复现脚本", "kind": "practice"},
+    "16-ran-tests-and-tools":                     {"rule": "第 1 步 跑确定性工具和 README 步骤", "kind": "practice"},
+    "17-working-tree-untouched":                  {"rule": "开头 全程只读，临时产物放 repo 外", "kind": "practice"},
+    "18-asks-before-updating-intentional-list":   {"rule": "第 4 步 结尾询问，同意后才写清单", "kind": "preference"}
+  },
+  "incremental-review-kvs": {
+    "01-declares-incremental-scope":    {"rule": "第 0 步 第 5 条 增量审查及范围注明", "kind": "preference"},
+    "02-drops-fully-fixed-list":        {"rule": "第 0 步 第 5 条 修复完整的去掉", "kind": "preference"},
+    "03-keeps-partial-delete-fix":      {"rule": "第 0 步 第 5 条 审修复本身，不完整的保留", "kind": "preference"},
+    "04-keeps-untouched-old-issues":    {"rule": "第 0 步 第 5 条 还在的旧问题保留", "kind": "preference"},
+    "05-finds-rename-self-delete":      {"rule": "第 2 步 正确性组：边界情况", "kind": "practice"},
+    "06-stats-side-by-side":            {"rule": "第 4 步 统计与上次并列", "kind": "preference"},
+    "07-baseline-updated":              {"rule": "第 4 步 基线记录固定的 commit", "kind": "preference"},
+    "08-uncommitted-file-not-reviewed": {"rule": "第 0 步 第 6 条 固定 commit，不审工作区", "kind": "preference"},
+    "09-fresh-verifier-agents":         {"rule": "第 3 步 新 agent 核实，不给审查者证据", "kind": "preference"}
+  }
+}

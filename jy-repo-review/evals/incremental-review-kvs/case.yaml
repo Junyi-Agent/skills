@@ -1,0 +1,6 @@
+schema_version: "1.1"
+name: incremental-review-kvs
+expected_outcome: |
+  做增量审查，范围是旧报告基线 d8a3a01 到 abe905f。list off-by-one 和 test_list 已完整修复，移出确认的问题；delete 只补了 _dirty 仍不持锁，保留并写明未修部分；README 漂移和 human_size 未改，保留；新增的 rename 在 old == new 时删掉 key，作为新发现上报。统计与上次并列，基线更新为 abe905f。
+context:
+  scaffold_script: place-files.sh
