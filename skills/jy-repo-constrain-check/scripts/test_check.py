@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tests for check.py on small fixture repos. Run: python3 jy-repo-constrain-check/scripts/test_check.py"""
+"""Tests for check.py on small fixture repos. Run: python3 skills/jy-repo-constrain-check/scripts/test_check.py"""
 
 from __future__ import annotations
 
