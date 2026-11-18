@@ -108,6 +108,32 @@ class CiTest(unittest.TestCase):
             s = ci({".github/workflows/ci.yml": text})
             self.assertIn("PR 触发：有；push 触发：有", facts(s), on_line)
 
+    def test_only_the_on_block_counts(self):
+        docker = WORKFLOW.format(on="  pull_request:\n") + (
+            "      - uses: docker/build-push-action@v6\n        with:\n          push: true\n"
+        )
+        guarded = WORKFLOW.format(on="  push:\n    branches: [main]\n").replace(
+            "    steps:", "    if: github.event_name != 'pull_request'\n    steps:"
+        )
+        cases = {docker: ("有", "无"), guarded: ("无", "有")}
+        for text, (pr, push) in cases.items():
+            s = ci({".github/workflows/ci.yml": text})
+            self.assertIn(f"PR 触发：{pr}；push 触发：{push}", facts(s), text)
+            self.assertEqual(s.verdict, "WARN", text)
+
+    def test_tag_only_push_is_not_a_branch_push(self):
+        files = {
+            ".github/workflows/ci.yml": WORKFLOW.format(on="  pull_request:\n"),
+            ".github/workflows/release.yml": WORKFLOW.format(on="  push:\n    tags: ['v*']\n"),
+        }
+        s = ci(files)
+        self.assertIn("push 触发：无", facts(s))
+        self.assertTrue(any("release.yml" in e and "tags" in e for e in s.evidence), s.evidence)
+        files[".github/workflows/release.yml"] = WORKFLOW.format(
+            on="  push:\n    tags: ['v*']\n    branches: [main]\n"
+        )
+        self.assertIn("push 触发：有", facts(ci(files)))
+
     def test_only_yaml_files_under_workflows(self):
         s = ci(
             {

@@ -94,8 +94,36 @@ class GitGuardTest(unittest.TestCase):
         ):
             self.assertTrue(self.denied(cmd, self.main), cmd)
             self.assertFalse(self.denied(cmd, self.feat), cmd)
-        for cmd in ("git merge --ff-only origin/main", "git merge --abort", "git pull"):
+        for cmd in (
+            "git merge --ff-only origin/main",
+            "git merge --abort",
+            "git pull",
+            "git merge --no-commit feature",
+            "git merge --squash feature",
+            "git cherry-pick -n abc",
+            "git revert --no-commit abc",
+            "git am --show-current-patch=diff",
+        ):
             self.assertFalse(self.denied(cmd, self.main), cmd)
+        # --skip goes on with the rest of the sequence, which creates commits
+        for cmd in ("git cherry-pick --skip", "git am --skip", "git revert --skip"):
+            self.assertTrue(self.denied(cmd, self.main), cmd)
+        # -n is --no-stat for merge, which still commits
+        self.assertTrue(self.denied("git merge -n feature", self.main))
+
+    def test_heredoc(self):
+        text = "cat > notes.md <<'EOF'\nDon't forget\nEOF\n"
+        self.assertTrue(self.denied(text + "git commit -am x", self.main))
+        self.assertTrue(self.denied(f"{text}git switch main", self.feat))
+        self.assertTrue(self.denied("git commit -F - <<EOF\nDon't\nEOF", self.main))
+        self.assertTrue(self.denied("cat <<-EOF\n\tit's\n\tEOF\ngit commit -m x", self.main))
+        self.assertFalse(self.denied(text + "git commit -am x", self.feat))
+        self.assertFalse(self.denied(text + "git status", self.main))
+        # the body of a heredoc fed to a shell is a script
+        self.assertTrue(self.denied("bash <<'EOF'\ngit push origin main\nEOF", self.feat))
+        # unparseable and mentions git: denied; unparseable without git: left to the shell
+        self.assertTrue(self.denied("echo it's && git commit -m x", self.feat))
+        self.assertFalse(self.denied("echo it's", self.feat))
 
     def test_subshell_scopes_cd(self):
         self.assertTrue(self.denied(f"(cd {self.main} && git commit -m x)", self.feat))
@@ -114,10 +142,33 @@ class GitGuardTest(unittest.TestCase):
             "command git push origin main",
             "nohup git push origin main",
             "env git push origin main",
+            "SKIP=review-gate bash -c 'git push'",
+            "env SKIP=review-gate sh -c 'git push -u origin feature'",
+            "time -p git push origin main",
+            "nohup -- git push origin main",
+            "command -p git push origin main",
+            f"env -C {self.main} git commit -m x",
+            f"env --chdir={self.main} git commit -m x",
+            f"pushd {self.main} && git commit -m x",
         ):
             self.assertTrue(self.denied(cmd, self.feat), cmd)
         self.assertFalse(self.denied("env FOO=1 git push", self.feat))
+        self.assertFalse(self.denied("FOO=1 bash -c 'git push'", self.feat))
         self.assertFalse(self.denied("bash -c 'git status'", self.main))
+        self.assertFalse(self.denied(f"env -C {self.feat} git commit -m x", self.main))
+        self.assertFalse(self.denied(f"pushd {self.main} && popd && git commit -m x", self.feat))
+
+    def test_aliases(self):
+        self.assertTrue(self.denied("git -c alias.ci=commit ci -m x", self.main))
+        self.assertTrue(self.denied("git -c alias.p='push origin main' p", self.feat))
+        self.assertTrue(self.denied("git -c 'alias.p=!git push origin main' p", self.feat))
+        self.assertTrue(self.denied("git -c alias.ci='commit --no-verify' ci -m x", self.feat))
+        self.assertFalse(self.denied("git -c alias.ci=commit ci -m x", self.feat))
+        git(self.feat, "config", "alias.sw", "switch")
+        try:
+            self.assertTrue(self.denied("git sw main", self.feat))
+        finally:
+            git(self.feat, "config", "--unset", "alias.sw")
 
     def test_commit_follows_dash_c(self):
         self.assertFalse(self.denied(f"git -C {self.feat} commit -m x", self.main))
@@ -141,7 +192,9 @@ class GitGuardTest(unittest.TestCase):
         self.assertFalse(self.denied("echo 'git commit -m x'", self.main))
 
     def test_redirections(self):
-        strip = git_guard.strip_redirections
+        def strip(cmd: str) -> str:
+            return git_guard.strip_redirections(cmd)[0]
+
         self.assertEqual(strip("a 2>&1 | b").split(), ["a", "|", "b"])
         self.assertEqual(strip("a >out <in b").split(), ["a", "b"])
         self.assertEqual(strip("a x2>f").split(), ["a", "x2"])  # not an fd: stdout redirect
@@ -160,6 +213,8 @@ class GitGuardTest(unittest.TestCase):
             "git commit -nm x",
             "git -c core.hooksPath=/dev/null push",
             "git config core.hooksPath /tmp/none",
+            "GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.hooksPath GIT_CONFIG_VALUE_0=/x git push",
+            "GIT_CONFIG_PARAMETERS=\"'core.hookspath'='/x'\" git commit -m x",
         ):
             self.assertTrue(self.denied(cmd, self.feat), cmd)
         self.assertFalse(self.denied("git push -n origin feature", self.feat))

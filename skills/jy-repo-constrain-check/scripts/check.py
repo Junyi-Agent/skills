@@ -675,9 +675,58 @@ CI_TEST = re.compile(
 CI_DEPLOY = re.compile(
     r"(?i)deploy|release|publish|docker push|gh release|twine upload|npm publish|helm upgrade|kubectl apply"
 )
+# PR trigger in CI systems other than GitHub Actions (GitLab rules, Azure `pr:` ...)
 CI_PR = re.compile(r"(?i)pull_request|merge_request|\bpr:")
-# GitHub Actions push trigger: `push:` key, `on: push`, `on: [push, ...]`, `- push` list item
-GHA_PUSH = re.compile(r"(?im)^\s*push\s*:|^\s*on\s*:\s*\[?[^\n#]*\bpush\b|^\s*-\s*push\s*$")
+# Top-level `on:` of a GitHub Actions workflow (YAML 1.1 parsers read a bare `on` as true)
+GHA_ON = re.compile(r"""^(?:on|"on"|'on'|true)\s*:\s*([^#]*?)\s*(?:#.*)?$""")
+
+
+def gha_triggers(text: str) -> tuple[dict[str, str], int]:
+    """Events under the top-level `on:` of a workflow, each with its filter lines.
+
+    Only the `on:` block is read, so `push: true` in a step or `pull_request` in an `if:`
+    is not taken for a trigger. Also returns the 1-based line of `on:` (0 if missing).
+    """
+    lines = text.splitlines()
+    for start, line in enumerate(lines):  # noqa: B007 (start is used after the loop)
+        m = GHA_ON.match(line)
+        if m:
+            break
+    else:
+        return {}, 0
+    inline = m.group(1)
+    if inline.startswith("{"):  # flow mapping: keep the keys, filters are not parsed
+        return dict.fromkeys(re.findall(r"([A-Za-z_]+)\s*:", inline), ""), start + 1
+    if inline:  # `on: push` or `on: [push, pull_request]`
+        return dict.fromkeys(re.findall(r"[A-Za-z_]+", inline), ""), start + 1
+    events: dict[str, str] = {}
+    indent, current = None, None
+    for line in lines[start + 1 :]:
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        ind = len(line) - len(line.lstrip())
+        if ind == 0 or (indent is not None and ind < indent):
+            break
+        if indent is None:
+            indent = ind
+        if ind == indent:
+            m = re.match(r"\s*(?:-\s*)?([A-Za-z_]+)", line)
+            current = m.group(1) if m else None
+            if current:
+                events[current] = ""
+        elif current:
+            events[current] += line.strip() + "\n"
+    return events, start + 1
+
+
+def gha_main_push(events: dict[str, str]) -> bool:
+    """A push trigger that can fire for branch pushes, not only for tags."""
+    if "push" not in events:
+        return False
+    filters = events["push"]
+    branches = re.search(r"(?m)^branches(-ignore)?\s*:", filters)
+    tags = re.search(r"(?m)^tags(-ignore)?\s*:", filters)
+    return bool(branches or not tags)
 
 
 def check_ci(root: Path, remote: bool) -> Section:
@@ -704,15 +753,26 @@ def check_ci(root: Path, remote: bool) -> Section:
     has = {
         k: bool(r.search(text))
         for k, r in (
-            ("PR 触发", CI_PR),
             ("lint", CI_LINT),
             ("测试", CI_TEST),
             ("部署/发布", CI_DEPLOY),
         )
     }
-    # Other CI systems build every push by default; GitHub Actions needs an explicit trigger.
+    # GitHub Actions: read the `on:` block. Other CI systems build every push by default.
     gha = [f for f in files if ".github" in f.parts]
-    has["push 触发"] = len(gha) < len(files) or any(GHA_PUSH.search(read(f)) for f in gha)
+    other = [f for f in files if f not in gha]
+    has["PR 触发"] = any(CI_PR.search(read(f)) for f in other)
+    has["push 触发"] = bool(other)
+    for f in gha:
+        events, line = gha_triggers(read(f))
+        has["PR 触发"] |= bool({"pull_request", "pull_request_target"} & events.keys())
+        has["push 触发"] |= gha_main_push(events)
+        if line:
+            push = " ".join(events.get("push", "").split())
+            s.evidence.append(
+                f"触发：`{rel(root, f)}:{line}` {', '.join(events) or '（空）'}"
+                + (f"；push 过滤：{push[:120]}" if push else "")
+            )
     order = ("PR 触发", "push 触发", "lint", "测试", "部署/发布")
     s.facts.append("；".join(f"{k}：{'有' if has[k] else '无'}" for k in order))
     weak = []
@@ -731,9 +791,10 @@ def check_ci(root: Path, remote: bool) -> Section:
     s.verdict = "JUDGE" if core and not weak else "WARN"
     if not has["部署/发布"]:
         s.facts.append("没有部署/发布步骤；如果这个项目需要发布，这是缺口")
-    s.judge.append(
-        "确认 CI 跑的检查和 pre-commit 一致（最好直接 `pre-commit run --all-files`），以及主分支是否要求这些检查通过才能合并"
-    )
+    s.judge += [
+        "看“触发”证据，确认 PR 和主分支 push 都会触发（push 只过滤 tag、或 branches 不含主分支的不算）",
+        "确认 CI 跑的检查和 pre-commit 一致（最好直接 `pre-commit run --all-files`），以及主分支是否要求这些检查通过才能合并",
+    ]
     return s
 
 

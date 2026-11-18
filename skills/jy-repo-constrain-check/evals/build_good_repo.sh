@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Builds, in the current (empty) directory, a repo that should pass all seven checks except
+# Builds, in the current (empty) directory, a repo that should pass all eight checks except
 # one planted gap: the agent review gate is declared on the pre-push stage, but only the
 # pre-commit hook is installed. Expected script verdicts: 2 = WARN (missing pre-push hook),
 # 4 = JUDGE with an "未安装" warning, 8 = JUDGE with type "工具类" (shell scripts only),
