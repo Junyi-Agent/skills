@@ -6,7 +6,7 @@
 |---|---|
 | [`jy-repo-review`](skills/jy-repo-review) | 只读代码审查，输出 `REVIEW.md` |
 | [`jy-repo-quiz`](skills/jy-repo-quiz) | 出题考你对 repo 的理解 |
-| [`jy-repo-constrain-check`](skills/jy-repo-constrain-check) | 检查 repo 的开发流程约束 |
+| [`jy-repo-constrain-check`](skills/jy-repo-constrain-check) | 检查 repo 的开发流程约束；工具类 repo 还查是否符合 Unix 设计哲学 |
 
 ## 自举
 
