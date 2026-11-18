@@ -2,9 +2,8 @@
 """pre-push gate: three Claude reviewers with different focuses vote on the pushed changes.
 
 The push goes through only when at least 2 of 3 approve. A reviewer that errors, times out
-or returns unparseable output counts as a rejection. Installed via pre-commit:
-
-    pre-commit install --hook-type pre-push
+or returns unparseable output counts as a rejection. Installed by `pre-commit install`
+(the config sets default_install_hook_types to pre-commit and pre-push).
 
 Reviewed range: merge-base(origin/main, pushed ref)..pushed ref, i.e. everything the
 feature branch (or its squash-merged result) adds on top of main.
@@ -110,9 +109,9 @@ def parse_output(name: str, stdout: str) -> Verdict:
         if out is None:
             out = json.loads(data["result"])
         return Verdict(
-            name, bool(out["approve"]), str(out["summary"]), list(out["blocking_issues"])
+            name, out["approve"] is True, str(out["summary"]), list(out["blocking_issues"])
         )
-    except (ValueError, KeyError, TypeError) as e:
+    except (ValueError, KeyError, TypeError, AttributeError) as e:
         return Verdict(name, False, f"unparseable reviewer output ({e}): {stdout[:300]}")
 
 

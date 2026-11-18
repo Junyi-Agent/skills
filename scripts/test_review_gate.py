@@ -40,7 +40,15 @@ class ReviewGateTest(unittest.TestCase):
         self.assertTrue(parse_output("x", out(True, structured=False)).approve)
 
     def test_bad_output_rejects(self):
-        for bad in ("", "not json", json.dumps({"result": "plain text"}), json.dumps({})):
+        approve_str = {"approve": "false", "summary": "", "blocking_issues": []}
+        for bad in (
+            "",
+            "not json",
+            "[]",
+            json.dumps({"result": "plain text"}),
+            json.dumps({}),
+            json.dumps({"structured_output": approve_str}),
+        ):
             self.assertFalse(parse_output("x", bad).approve, bad)
 
     def test_missing_cli_rejects(self):
