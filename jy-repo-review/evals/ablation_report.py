@@ -11,6 +11,7 @@ the pass rate in each config plus a verdict on the SKILL.md rule behind it:
   可压缩     description_only passes >= THRESH but without_skill does not: one line is enough
   保留       only the full skill gets it done
   skill 失效 with_skill itself passes < THRESH: the rule is not working, fix it before judging
+  缺数据     some config has no graded run for this assertion: rerun it before judging
 """
 
 import json
@@ -76,11 +77,13 @@ def main() -> None:
         for stem in sorted(tally):
             rate = {c: (p / n if n else None) for c, (p, n) in tally[stem].items()}
             full, desc, none = rate["with_skill"], rate["description_only"], rate["without_skill"]
-            if full is not None and full < THRESH:
+            if None in (full, desc, none):
+                verdict = "缺数据"
+            elif full < THRESH:
                 verdict = "skill 失效"
-            elif none is not None and none >= THRESH:
+            elif none >= THRESH:
                 verdict = "可删"
-            elif desc is not None and desc >= THRESH:
+            elif desc >= THRESH:
                 verdict = "可压缩"
             else:
                 verdict = "保留"

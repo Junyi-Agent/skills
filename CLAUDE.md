@@ -23,7 +23,7 @@ push 时 pre-push hook 跑 `scripts/review_gate.py`：3 个 Claude 分别从正�
 pre-commit install
 ```
 
-提交前会跑 ruff format、ruff check、shellcheck、YAML/JSON 校验。手动全量跑：`pre-commit run --all-files`。CI（`.github/workflows/ci.yml`）跑同一套配置。
+提交前会跑 ruff format、ruff check、shellcheck、YAML/JSON 校验，改到对应文件时还会跑 git guard、审查门禁和 constrain-check 脚本的单元测试。手动全量跑：`pre-commit run --all-files`。CI（`.github/workflows/ci.yml`）跑同一套配置。
 
 ## 约定
 

@@ -1,10 +1,15 @@
 #!/usr/bin/env python3
 """PreToolUse hook (Bash): enforce the worktree workflow from CLAUDE.md.
 
-Denies switching branches in place, committing on main, pushing to main, skipping the
-git hooks (--no-verify, SKIP=, core.hooksPath), and merging a PR whose CI checks have not
-all passed (`gh pr merge`, or the merge endpoint through `gh api`). The branch is read from the directory each git command actually runs in:
-`cd <dir>` earlier in the same command and `git -C <dir>` are both followed.
+Denies switching branches in place, creating commits on main (commit, merge, cherry-pick,
+revert, am), pushing to main, skipping the git hooks (--no-verify, SKIP=, core.hooksPath),
+and merging a PR whose CI checks have not all passed (`gh pr merge`, or the merge endpoint
+through `gh api`).
+
+The branch is read from the directory each git command actually runs in: `cd <dir>` earlier
+in the same command, `( ... )` subshells and `git -C <dir>` are all followed. Wrappers are
+looked through: `env VAR=x`, `command`, `exec`, `nohup`, `time`, and `bash -c '...'`.
+If the hook input cannot be read, or the check itself fails, the command is denied.
 """
 
 from __future__ import annotations
@@ -17,15 +22,18 @@ import subprocess
 import sys
 
 PROTECTED = "main"
-SEPARATORS = {";", "&&", "||", "|", "&", "\n"}
+PUNCT = ";&|()"
 ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
 
 SWITCH_MSG = (
     "Do not switch branches in this directory. Create a worktree outside the repo: "
-    "git worktree add ../<repo>-<feature> -b <feature> origin/main (see CLAUDE.md)."
+    "git worktree add ../<repo>-<feature> -b <feature> origin/main (see CLAUDE.md). "
+    "To restore files, use `git checkout -- <path>` or `git restore <path>`."
 )
 COMMIT_MSG = (
-    "Do not commit on main. Work in a worktree on a feature branch and open a PR (see CLAUDE.md)."
+    "Do not create commits on main (commit, merge, cherry-pick, revert, am). Work in a "
+    "worktree on a feature branch and open a PR (see CLAUDE.md). To update main, use "
+    "`git pull --ff-only` or `git merge --ff-only`."
 )
 PUSH_MSG = "Do not push to main. Push a feature branch and open a PR (see CLAUDE.md)."
 BYPASS_MSG = (
@@ -33,6 +41,15 @@ BYPASS_MSG = (
     "pre-push review gate must run. Fix what they report instead (see CLAUDE.md)."
 )
 MERGE_API_MSG = "Merge PRs with `gh pr merge` so the CI check gate applies (see CLAUDE.md)."
+# Commands that create commits on the current branch, and the options that make them not do so.
+COMMIT_CMDS = {"commit", "merge", "cherry-pick", "revert", "am"}
+NO_COMMIT_OPTS = {"--ff-only", "--abort", "--quit", "--skip"}
+# `git checkout` options that create or switch to a branch.
+SWITCH_OPTS = {"-b", "-B", "--orphan", "--detach", "-t", "--track"}
+# Prefixes that run the rest of the words as a command.
+WRAPPERS = {"command", "exec", "nohup", "time", "builtin"}
+ENV_VALUE_OPTS = {"-u", "--unset", "-C", "--chdir"}
+SHELLS = {"bash", "sh", "zsh", "dash", "ksh"}
 # `gh pr merge` options that take a value; everything else non-dash is the PR selector.
 GH_VALUE_OPTS = {
     "-R", "--repo", "-t", "--subject", "-b", "--body", "-F", "--body-file",
@@ -104,16 +121,52 @@ def strip_redirections(command: str) -> str:
 
 
 def segments(command: str) -> list[list[str]]:
+    """Split a command line into simple commands.
+
+    `(` and `)` come back as one-word segments so the caller can scope `cd` to a subshell.
+    """
     command = strip_redirections(command)
-    lexer = shlex.shlex(command.replace("\n", " ; "), posix=True, punctuation_chars=";&|")
+    lexer = shlex.shlex(command.replace("\n", " ; "), posix=True, punctuation_chars=PUNCT)
     lexer.whitespace_split = True
     out: list[list[str]] = [[]]
     for tok in lexer:
-        if tok in SEPARATORS:
-            out.append([])
-        else:
+        if not tok or any(c not in PUNCT for c in tok):
             out[-1].append(tok)
+            continue
+        for c in tok:  # a punctuation run such as `)&&` or `((`
+            if c in "()":
+                out += [[c], []]
+            elif out[-1]:
+                out.append([])
     return [s for s in out if s]
+
+
+def unwrap(seg: list[str]) -> tuple[list[str], bool]:
+    """Drop leading `VAR=x` words and wrappers; return the command and whether SKIP= was set."""
+    skip_env = False
+    while seg:
+        if ASSIGNMENT.match(seg[0]):
+            skip_env |= seg[0].startswith("SKIP=")
+            seg = seg[1:]
+        elif seg[0] == "env":
+            seg = seg[1:]
+            while seg and seg[0].startswith("-"):
+                seg = seg[2:] if seg[0] in ENV_VALUE_OPTS else seg[1:]
+        elif seg[0] in WRAPPERS:
+            seg = seg[1:]
+        else:
+            break
+    return seg, skip_env
+
+
+def shell_script(seg: list[str]) -> str | None:
+    """The script of `bash -c '<script>'` (also `sh`, `zsh`, `-lc`, `-ec` ...), else None."""
+    if not seg or os.path.basename(seg[0]) not in SHELLS:
+        return None
+    for i, a in enumerate(seg[1:-1], 1):
+        if re.fullmatch(r"-[a-zA-Z]*c[a-zA-Z]*", a):
+            return seg[i + 1]
+    return None
 
 
 def resolve(base: str, path: str) -> str:
@@ -156,12 +209,42 @@ def parse_git(args: list[str], cwd: str) -> tuple[str, str, list[str]]:
     return cwd, args[i], args[i + 1 :]
 
 
-def pushes_to_protected(refspecs: list[str]) -> bool:
+def pushes_to_protected(refspecs: list[str], cwd: str) -> bool:
     for spec in refspecs:
         dst = spec.lstrip("+").split(":")[-1]
+        if dst in ("HEAD", "@"):
+            dst = current_branch(cwd)
         if dst in (PROTECTED, f"refs/heads/{PROTECTED}"):
             return True
     return False
+
+
+def is_commit(cwd: str, rev: str) -> bool:
+    try:
+        r = subprocess.run(
+            ["git", "-C", cwd, "rev-parse", "--verify", "--quiet", f"{rev}^{{commit}}"],
+            capture_output=True,
+            timeout=5,
+            env=clean_env(),
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return r.returncode == 0
+
+
+def checkout_switches(rest: list[str], cwd: str) -> bool:
+    """Whether `git checkout <rest>` switches branch rather than restoring files."""
+    if any(a in SWITCH_OPTS or a.startswith(("--orphan=", "--track=")) for a in rest):
+        return True
+    if "--" in rest or any(a in ("-p", "--patch") for a in rest):
+        return False
+    positional = [a for a in rest if a == "-" or not a.startswith("-")]
+    if len(positional) != 1:  # none: stays on the branch; two or more: <tree-ish> <paths>
+        return False
+    target = positional[0]
+    if target == ".":
+        return False
+    return is_commit(cwd, target) or not os.path.exists(resolve(cwd, target))
 
 
 def pr_checks(args: list[str], cwd: str) -> tuple[int, str]:
@@ -208,12 +291,22 @@ def check(command: str, cwd: str) -> str | None:
         segs = segments(command)
     except ValueError:  # unbalanced quotes: let the shell report it
         return None
-    for seg in segs:
-        skip_env = False
-        while seg and ASSIGNMENT.match(seg[0]):
-            skip_env |= seg[0].startswith("SKIP=")
-            seg = seg[1:]
+    stack: list[str] = []
+    for raw in segs:
+        if raw == ["("]:
+            stack.append(cwd)
+            continue
+        if raw == [")"]:
+            cwd = stack.pop() if stack else cwd
+            continue
+        seg, skip_env = unwrap(raw)
         if not seg:
+            continue
+        script = shell_script(seg)
+        if script is not None:
+            reason = check(script, cwd)
+            if reason:
+                return reason
             continue
         if seg[0] == "cd":
             cwd = resolve(cwd, seg[1]) if len(seg) > 1 else os.path.expanduser("~")
@@ -242,35 +335,52 @@ def check(command: str, cwd: str) -> str | None:
             return BYPASS_MSG
         if sub == "switch":
             return SWITCH_MSG
-        if sub == "checkout" and rest and rest[0] not in ("--", "."):
+        if sub == "checkout" and checkout_switches(rest, git_cwd):
             return SWITCH_MSG
-        if sub == "commit" and current_branch(git_cwd) == PROTECTED:
+        if (
+            sub in COMMIT_CMDS
+            and not NO_COMMIT_OPTS.intersection(rest)
+            and current_branch(git_cwd) == PROTECTED
+        ):
             return COMMIT_MSG
         if sub == "push":
             positional = [a for a in rest if not a.startswith("-")]
             refspecs = positional[1:]
-            if pushes_to_protected(refspecs):
+            if pushes_to_protected(refspecs, git_cwd):
                 return PUSH_MSG
             if not refspecs and current_branch(git_cwd) == PROTECTED:
                 return PUSH_MSG
     return None
 
 
+def deny(reason: str) -> None:
+    json.dump(
+        {
+            "hookSpecificOutput": {
+                "hookEventName": "PreToolUse",
+                "permissionDecision": "deny",
+                "permissionDecisionReason": reason,
+            }
+        },
+        sys.stdout,
+    )
+
+
 def main() -> None:
-    data = json.load(sys.stdin)
-    command = data.get("tool_input", {}).get("command", "")
-    reason = check(command, data.get("cwd") or os.getcwd())
-    if reason:
-        json.dump(
-            {
-                "hookSpecificOutput": {
-                    "hookEventName": "PreToolUse",
-                    "permissionDecision": "deny",
-                    "permissionDecisionReason": reason,
-                }
-            },
-            sys.stdout,
+    # Fail closed: a guard that crashes would otherwise let the command run.
+    try:
+        data = json.load(sys.stdin)
+        command = data["tool_input"]["command"]
+        if not isinstance(command, str):
+            raise TypeError(f"command is {type(command).__name__}, not str")
+        reason = check(command, data.get("cwd") or os.getcwd())
+    except Exception as e:
+        reason = (
+            f"git_guard could not check this command ({type(e).__name__}: {e}), so it is "
+            "denied. Fix .claude/hooks/git_guard.py or the hook input."
         )
+    if reason:
+        deny(reason)
 
 
 if __name__ == "__main__":
