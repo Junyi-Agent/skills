@@ -8,9 +8,10 @@
 set -euo pipefail
 git init -q -b main .
 mkdir -p docs/adr scripts .github/workflows .claude/hooks
-echo '状态定义：已采纳 = 用户实际测试过；提议 = 写了但未测试。' > docs/adr/README.md
-printf '# ADR-001 用 ruff\n\n状态：已采纳\n' > docs/adr/0001-ruff.md
-printf '# ADR-002 换存储\n\n状态：提议（未测试）\n' > docs/adr/0002-store.md
+echo '状态定义：提议 = 只写了 ADR 文档；采纳 = 允许去实现，可能已经实现；已验证 = 人类测试了代码并确认了实现的内容。' > docs/adr/README.md
+printf '# ADR-001 用 ruff\n\n状态：已验证\n' > docs/adr/0001-ruff.md
+printf '# ADR-002 换存储\n\n状态：提议\n' > docs/adr/0002-store.md
+printf '# ADR-003 加缓存\n\n状态：采纳\n' > docs/adr/0003-cache.md
 cat > .pre-commit-config.yaml <<'Y'
 repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit
