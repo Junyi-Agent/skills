@@ -68,6 +68,18 @@ class GitGuardTest(unittest.TestCase):
         self.assertFalse(self.denied("git status", self.main))
         self.assertFalse(self.denied("echo 'git commit -m x'", self.main))
 
+    def test_redirections(self):
+        strip = git_guard.strip_redirections
+        self.assertEqual(strip("a 2>&1 | b").split(), ["a", "|", "b"])
+        self.assertEqual(strip("a >out <in b").split(), ["a", "b"])
+        self.assertEqual(strip("a x2>f").split(), ["a", "x2"])  # not an fd: stdout redirect
+        self.assertEqual(strip("a '2>x' \"3>y\"").split(), ["a", "'2>x'", '"3>y"'])
+        self.assertEqual(strip("a > 'my log' b").split(), ["a", "b"])
+        self.assertEqual(strip("a && b").split(), ["a", "&&", "b"])
+        self.assertTrue(self.denied("git push origin main 2>&1", self.feat))
+        self.assertTrue(self.denied("git push 2>&1 | tail", self.main))
+        self.assertTrue(self.denied("git commit -m x >/dev/null", self.main))
+
     def test_hook_bypass(self):
         for cmd in (
             "git push --no-verify",
@@ -103,6 +115,17 @@ class GitGuardTest(unittest.TestCase):
             git_guard.pr_checks = fake(1)  # failed / no checks
             self.assertTrue(self.denied("gh pr merge --squash --delete-branch", self.main))
             self.assertEqual(calls[-1], [])
+            git_guard.pr_checks = fake(0)
+            for cmd in (
+                "gh pr merge 6 --squash 2>&1 | tail -5",
+                "gh pr merge 6 >/dev/null 2>&1",
+                "gh pr merge 6 &> log",
+                "gh pr merge 2>err.txt 6",
+            ):
+                self.assertFalse(self.denied(cmd, self.main), cmd)
+                self.assertEqual(calls[-1], ["6"], cmd)
+            self.assertFalse(self.denied("gh pr merge 7 --squash > out", self.main))
+            self.assertEqual(calls[-1], ["7"])
         finally:
             git_guard.pr_checks = orig
 

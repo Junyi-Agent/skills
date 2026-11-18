@@ -40,7 +40,71 @@ GH_VALUE_OPTS = {
 }  # fmt: skip
 
 
+REDIRECT_OPS = ("&>>", "&>", "<<<", "<<-", "<<", ">>", ">&", ">|", "<&", "<>", ">", "<")
+WORD_END = set(" \t\n;&|<>()")
+
+
+def strip_redirections(command: str) -> str:
+    """Drop shell redirections (`2>&1`, `> log`, `<<EOF`) outside quotes, with their targets.
+
+    Without this, `gh pr merge 6 2>&1` would pass `2>` to `gh pr checks` as the PR selector.
+    A leading fd number counts only when it is the whole unquoted word, as in the shell.
+    """
+    out: list[str] = []
+    quote = ""
+    word_start, word_quoted = 0, False
+    i, n = 0, len(command)
+    while i < n:
+        c = command[i]
+        if quote:
+            out.append(c)
+            if c == "\\" and quote == '"' and i + 1 < n:
+                out.append(command[i + 1])
+                i += 1
+            elif c == quote:
+                quote = ""
+            i += 1
+            continue
+        if c == "\\" and i + 1 < n:
+            out.append(command[i : i + 2])
+            word_quoted = True
+            i += 2
+            continue
+        if c in "'\"":
+            quote, word_quoted = c, True
+            out.append(c)
+            i += 1
+            continue
+        op = next((o for o in REDIRECT_OPS if command.startswith(o, i)), "")
+        if op and not command.startswith("(", i + len(op)):  # `<(..)` is process substitution
+            word = "".join(out[word_start:])
+            if word.isdigit() and not word_quoted:
+                del out[word_start:]  # fd number, e.g. the 2 in 2>&1
+            i += len(op)
+            while i < n and command[i] in " \t":
+                i += 1
+            target_quote = ""
+            while i < n and (target_quote or command[i] not in WORD_END):
+                ch = command[i]
+                if target_quote:
+                    target_quote = "" if ch == target_quote else target_quote
+                elif ch in "'\"":
+                    target_quote = ch
+                elif ch == "\\":
+                    i += 1
+                i += 1
+            out.append(" ")
+            word_start, word_quoted = len(out), False
+            continue
+        out.append(c)
+        i += 1
+        if c in WORD_END:
+            word_start, word_quoted = len(out), False
+    return "".join(out)
+
+
 def segments(command: str) -> list[list[str]]:
+    command = strip_redirections(command)
     lexer = shlex.shlex(command.replace("\n", " ; "), posix=True, punctuation_chars=";&|")
     lexer.whitespace_split = True
     out: list[list[str]] = [[]]
