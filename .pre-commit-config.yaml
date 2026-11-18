@@ -31,9 +31,9 @@ repos:
         pass_filenames: false
       - id: check-script-tests
         name: constrain-check script tests
-        entry: python3 jy-repo-constrain-check/scripts/test_check.py
+        entry: python3 skills/jy-repo-constrain-check/scripts/test_check.py
         language: system
-        files: ^jy-repo-constrain-check/scripts/
+        files: ^skills/jy-repo-constrain-check/scripts/
         pass_filenames: false
       - id: review-gate-tests
         name: review gate tests

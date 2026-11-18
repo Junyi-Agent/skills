@@ -1,6 +1,6 @@
 # skills-repo
 
-Agent Skills（SKILL.md 格式）。每个顶层 `jy-*` 目录是一个 skill，`.claude/skills/` 下是指向它们的软链接，供本仓库内使用。
+Agent Skills（SKILL.md 格式）。每个 `skills/jy-*` 目录是一个 skill，`.claude/skills/` 下是指向它们的软链接，供本仓库内使用。新增 skill 放进 `skills/`，并在 `.claude/skills/` 加一条 `../../skills/<name>` 软链接。
 
 ## 开发流程
 
