@@ -8,7 +8,7 @@ Agent Skills（SKILL.md 格式）。每个顶层 `jy-*` 目录是一个 skill，
   `git worktree add ../skills-repo-<feature> -b <feature> origin/main`
 - 不在当前目录切换分支（`git checkout <branch>` / `git switch`）。
 - 不在 `main` 上提交，不 push 到 `main`。push feature 分支后开 PR，CI 通过后合并。
-- 以上规则由 `.claude/hooks/git-guard.sh`（PreToolUse hook）强制执行。
+- 以上规则由 `.claude/hooks/git_guard.py`（PreToolUse hook）强制执行。
 
 ## 本地检查
 
