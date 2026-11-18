@@ -183,7 +183,11 @@ def main() -> int:
         "diff": diff,
     }
 
-    print(f"review gate: {len(REVIEWERS)} reviewers on {base[:12]}..{head}", flush=True)
+    print(
+        f"review gate: {len(REVIEWERS)} reviewers on {base[:12]}..{head}",
+        file=sys.stderr,
+        flush=True,
+    )
     with ThreadPoolExecutor(len(REVIEWERS)) as pool:
         futures = [
             pool.submit(run_reviewer, name, focus, ctx, root) for name, focus in REVIEWERS.items()
