@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import json
 import subprocess
 import sys
 import tempfile
@@ -13,11 +14,25 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import git_guard
 from git_guard import check, clean_env
 
+HOOK = Path(__file__).resolve().parent / "git_guard.py"
+
 
 def make_repo(root: Path, name: str, branch: str) -> Path:
     path = root / name
     subprocess.run(["git", "init", "-q", "-b", branch, str(path)], check=True, env=clean_env())
     return path
+
+
+def git(path: str, *args: str) -> None:
+    ident = ["-c", "user.name=t", "-c", "user.email=t@example.invalid"]
+    subprocess.run(["git", "-C", path, *ident, *args], check=True, env=clean_env())
+
+
+def run_hook(stdin: str) -> str:
+    r = subprocess.run(
+        [sys.executable, str(HOOK)], input=stdin, capture_output=True, text=True, check=False
+    )
+    return r.stdout
 
 
 class GitGuardTest(unittest.TestCase):
@@ -27,6 +42,11 @@ class GitGuardTest(unittest.TestCase):
         root = Path(cls.tmp.name)
         cls.main = str(make_repo(root, "repo", "main"))
         cls.feat = str(make_repo(root, "repo-feature", "feature"))
+        # feature repo with history: a tracked file and a second branch
+        (Path(cls.feat) / "a.py").write_text("x = 1\n")
+        git(cls.feat, "add", "a.py")
+        git(cls.feat, "commit", "-qm", "init")
+        git(cls.feat, "branch", "other")
 
     @classmethod
     def tearDownClass(cls):
@@ -36,9 +56,24 @@ class GitGuardTest(unittest.TestCase):
         return check(cmd, cwd) is not None
 
     def test_branch_switching(self):
-        for cmd in ("git switch main", "git checkout main", "git checkout -b foo"):
+        for cmd in (
+            "git switch main",
+            "git checkout main",
+            "git checkout other",
+            "git checkout -b foo",
+            "git checkout -",
+            "git checkout --track origin/x",
+        ):
             self.assertTrue(self.denied(cmd, self.feat), cmd)
-        for cmd in ("git checkout -- a.py", "git checkout .", "git worktree add ../x -b x"):
+        for cmd in (
+            "git checkout -- a.py",
+            "git checkout .",
+            "git checkout a.py",
+            "git checkout HEAD -- a.py",
+            "git checkout other a.py",
+            "git checkout -p a.py",
+            "git worktree add ../x -b x",
+        ):
             self.assertFalse(self.denied(cmd, self.feat), cmd)
 
     def test_commit_uses_session_cwd(self):
@@ -50,6 +85,40 @@ class GitGuardTest(unittest.TestCase):
         self.assertTrue(self.denied(f"cd {self.main} && git commit -m x", self.feat))
         self.assertTrue(self.denied("cd ../repo && git commit -m x", self.feat))
 
+    def test_other_commit_creating_commands_on_main(self):
+        for cmd in (
+            "git merge feature",
+            "git cherry-pick abc",
+            "git revert abc",
+            "git am x.patch",
+        ):
+            self.assertTrue(self.denied(cmd, self.main), cmd)
+            self.assertFalse(self.denied(cmd, self.feat), cmd)
+        for cmd in ("git merge --ff-only origin/main", "git merge --abort", "git pull"):
+            self.assertFalse(self.denied(cmd, self.main), cmd)
+
+    def test_subshell_scopes_cd(self):
+        self.assertTrue(self.denied(f"(cd {self.main} && git commit -m x)", self.feat))
+        self.assertTrue(self.denied(f"(cd {self.main}&&git commit -m x)", self.feat))
+        self.assertFalse(self.denied(f"(cd {self.main}) && git commit -m x", self.feat))
+        self.assertTrue(self.denied(f"(cd {self.feat}) && git commit -m x", self.main))
+        self.assertTrue(self.denied("echo $(git push origin main)", self.feat))
+
+    def test_wrappers(self):
+        for cmd in (
+            "env SKIP=review-gate git push",
+            "env -u FOO SKIP=review-gate git push",
+            "bash -c 'git push origin main'",
+            "sh -lc 'git commit --no-verify -m x'",
+            f"bash -c 'cd {self.main} && git commit -m x'",
+            "command git push origin main",
+            "nohup git push origin main",
+            "env git push origin main",
+        ):
+            self.assertTrue(self.denied(cmd, self.feat), cmd)
+        self.assertFalse(self.denied("env FOO=1 git push", self.feat))
+        self.assertFalse(self.denied("bash -c 'git status'", self.main))
+
     def test_commit_follows_dash_c(self):
         self.assertFalse(self.denied(f"git -C {self.feat} commit -m x", self.main))
         self.assertTrue(self.denied(f"git -C {self.main} commit -m x", self.feat))
@@ -60,6 +129,9 @@ class GitGuardTest(unittest.TestCase):
         self.assertTrue(self.denied("git push origin main", self.feat))
         self.assertTrue(self.denied("git push origin HEAD:main", self.feat))
         self.assertTrue(self.denied(f"git -C {self.main} push", self.feat))
+        for cmd in ("git push origin HEAD", "git push origin @", "git push -u origin +HEAD"):
+            self.assertTrue(self.denied(cmd, self.main), cmd)
+            self.assertFalse(self.denied(cmd, self.feat), cmd)
         self.assertFalse(self.denied("git push -u origin feature", self.main))
         self.assertFalse(self.denied("git push", self.feat))
         self.assertFalse(self.denied(f"cd {self.feat} && git push", self.main))
@@ -128,6 +200,15 @@ class GitGuardTest(unittest.TestCase):
             self.assertEqual(calls[-1], ["7"])
         finally:
             git_guard.pr_checks = orig
+
+    def test_bad_input_fails_closed(self):
+        for stdin in ("not json", "", "[]", '{"tool_input": null}', '{"tool_input": {}}'):
+            out = run_hook(stdin)
+            self.assertIn('"deny"', out, stdin)
+        ok = json.dumps({"tool_input": {"command": "git status"}, "cwd": self.feat})
+        self.assertEqual(run_hook(ok), "")
+        bad = json.dumps({"tool_input": {"command": "git switch x"}, "cwd": self.feat})
+        self.assertIn('"deny"', run_hook(bad))
 
     def test_merge_via_api(self):
         self.assertTrue(self.denied("gh api -X PUT repos/o/r/pulls/3/merge", self.main))

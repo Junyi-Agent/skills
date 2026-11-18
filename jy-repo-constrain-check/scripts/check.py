@@ -54,6 +54,17 @@ def walk(root: Path, max_depth: int = MAX_DEPTH):
             yield d / f
 
 
+def files_under(d: Path) -> list[Path]:
+    """Files below d, skipping SKIP_DIRS (e.g. __pycache__) and compiled .pyc files."""
+    return [
+        f
+        for f in d.rglob("*")
+        if f.is_file()
+        and f.suffix != ".pyc"
+        and not SKIP_DIRS.intersection(f.relative_to(d).parts[:-1])
+    ]
+
+
 def read(p: Path) -> str:
     try:
         if p.stat().st_size > MAX_FILE:
@@ -326,11 +337,14 @@ LINTERS = re.compile(
     r"golangci-lint|go vet|staticcheck|clippy|shellcheck|hadolint|markdownlint|tsc|stylelint|"
     r"rubocop|ktlint|swiftlint|tflint|yamllint|actionlint)\b"
 )
+# Evidence only: the model reads the snippet and decides. shellcheck's `--severity` is not
+# listed: `style` is its default and every other level reports less.
 STRICT = re.compile(
-    r"(?i)--strict|strict\s*=\s*true|typeCheckingMode\s*[:=]\s*\"?strict|select\s*=\s*\[\s*\"ALL\"|"
-    r"extend-select|--max-warnings[= ]0|-D\s*warnings|--deny[= ]warnings|"
+    r"(?i)--strict|strict\s*=\s*true|typeCheckingMode\s*[:=]\s*\"?strict|"
+    r"^\s*(extend-)?select\s*=\s*\[|--enable[= ]all|(^|\s)-o\s*all\b|"
+    r"--max-warnings[= ]0|-D\s*warnings|--deny[= ]warnings|"
     r"disallow_untyped_defs|warn_unused_ignores|--exit-non-zero-on-fix|\"strict\"\s*:\s*true|"
-    r"--fail-on|--error|--severity[= ](style|info|warning)|"
+    r"--fail-on|--error|"
     r"enable-all:\s*true|default:\s*all|require-explanation:\s*true|require-specific:\s*true|"
     r"\"recommended\"\s*:\s*true|plugin:@typescript-eslint/strict|strictTypeChecked"
 )
@@ -376,7 +390,7 @@ def hook_texts(root: Path, hooks: list[Path]) -> list[Path]:
         if p.is_file():
             files.append(p)
         elif p.is_dir():
-            files += [f for f in p.rglob("*") if f.is_file() and f.parent.name != "_"]
+            files += [f for f in files_under(p) if f.parent.name != "_"]
     files += hooks
     return files
 
@@ -446,7 +460,7 @@ def check_agent_gate(root: Path, hooks: list[Path]) -> Section:
     for d in SCRIPT_DIRS:
         p = root / d
         if p.is_dir():
-            candidates += [f for f in p.rglob("*") if f.is_file() and f.stat().st_size < MAX_FILE]
+            candidates += [f for f in files_under(p) if f.stat().st_size < MAX_FILE]
     seen, hits = set(), []
     for f in candidates:
         if f in seen:
@@ -578,7 +592,7 @@ def check_enforcement(root: Path, hooks: list[Path]) -> Section:
                 )
     ch = root / ".claude" / "hooks"
     if ch.is_dir():
-        files = [f for f in ch.rglob("*") if f.is_file()]
+        files = files_under(ch)
         if files:
             found = True
             s.facts.append(f"`.claude/hooks/` 下 {len(files)} 个脚本")
@@ -660,7 +674,9 @@ CI_TEST = re.compile(
 CI_DEPLOY = re.compile(
     r"(?i)deploy|release|publish|docker push|gh release|twine upload|npm publish|helm upgrade|kubectl apply"
 )
-CI_PR = re.compile(r"(?i)pull_request|merge_request|\bpr:|branches:|on:\s*\[.*push")
+CI_PR = re.compile(r"(?i)pull_request|merge_request|\bpr:")
+# GitHub Actions push trigger: `push:` key, `on: push`, `on: [push, ...]`, `- push` list item
+GHA_PUSH = re.compile(r"(?im)^\s*push\s*:|^\s*on\s*:\s*\[?[^\n#]*\bpush\b|^\s*-\s*push\s*$")
 
 
 def check_ci(root: Path, remote: bool) -> Section:
@@ -671,7 +687,9 @@ def check_ci(root: Path, remote: bool) -> Section:
         if p.is_file():
             files.append(p)
         elif p.is_dir():
-            files += sorted(f for f in p.rglob("*") if f.suffix in (".yml", ".yaml") or f.is_file())
+            files += sorted(
+                f for f in p.rglob("*") if f.is_file() and f.suffix in (".yml", ".yaml")
+            )
     if not files:
         s.facts.append("没有 CI 配置")
         return s
@@ -685,13 +703,17 @@ def check_ci(root: Path, remote: bool) -> Section:
     has = {
         k: bool(r.search(text))
         for k, r in (
-            ("PR/push 触发", CI_PR),
+            ("PR 触发", CI_PR),
             ("lint", CI_LINT),
             ("测试", CI_TEST),
             ("部署/发布", CI_DEPLOY),
         )
     }
-    s.facts.append("；".join(f"{k}：{'有' if v else '无'}" for k, v in has.items()))
+    # Other CI systems build every push by default; GitHub Actions needs an explicit trigger.
+    gha = [f for f in files if ".github" in f.parts]
+    has["push 触发"] = len(gha) < len(files) or any(GHA_PUSH.search(read(f)) for f in gha)
+    order = ("PR 触发", "push 触发", "lint", "测试", "部署/发布")
+    s.facts.append("；".join(f"{k}：{'有' if has[k] else '无'}" for k in order))
     weak = []
     for f in files:
         weak += grep(root, f, WEAK, limit=3)
@@ -704,7 +726,7 @@ def check_ci(root: Path, remote: bool) -> Section:
         if prot:
             s.facts.append(prot)
 
-    core = has["PR/push 触发"] and has["lint"] and has["测试"]
+    core = has["PR 触发"] and has["push 触发"] and has["lint"] and has["测试"]
     s.verdict = "JUDGE" if core and not weak else "WARN"
     if not has["部署/发布"]:
         s.facts.append("没有部署/发布步骤；如果这个项目需要发布，这是缺口")
@@ -716,11 +738,12 @@ def check_ci(root: Path, remote: bool) -> Section:
 
 def branch_protection(root: Path) -> str:
     url = git(root, "remote", "get-url", "origin")
-    m = re.search(r"github\.com[:/]([^/]+)/([^/.]+)", url)
+    m = re.search(r"github\.com[:/]([^/]+)/(.+?)(?:\.git)?/?$", url)
     if not m or not shutil.which("gh"):
         return ""
     branch = (
-        git(root, "symbolic-ref", "--short", "refs/remotes/origin/HEAD").split("/")[-1] or "main"
+        git(root, "symbolic-ref", "--short", "refs/remotes/origin/HEAD").removeprefix("origin/")
+        or "main"
     )
     try:
         r = subprocess.run(
