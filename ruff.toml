@@ -1,0 +1,9 @@
+line-length = 100
+target-version = "py310"
+
+[lint]
+select = ["E", "F", "W", "B", "I", "UP", "SIM", "RUF"]
+ignore = [
+  "RUF001", "RUF002", "RUF003",  # strings/comments are Chinese; fullwidth punctuation is intentional
+  "E501",  # line length is handled by ruff-format; remaining long lines are regexes / messages
+]

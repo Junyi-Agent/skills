@@ -1,3 +1,5 @@
 jy-repo-review-workspace/
 *-workspace/
 evals/results/
+__pycache__/
+*.pyc
