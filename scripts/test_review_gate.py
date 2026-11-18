@@ -185,6 +185,19 @@ class MainTest(unittest.TestCase):
         self.assertEqual(self.run_main(), 0)
         self.assertIn("feature.txt", self.calls[0]["diff"])
 
+    def test_long_diff_is_truncated(self):
+        commit(self.repo, "big.txt", "x\n" * 500)
+        orig = review_gate.MAX_DIFF_CHARS
+        review_gate.MAX_DIFF_CHARS = 300
+        try:
+            self.assertEqual(self.run_main(), 0)
+        finally:
+            review_gate.MAX_DIFF_CHARS = orig
+        diff = self.calls[0]["diff"]
+        self.assertTrue(diff.startswith("diff --git a/big.txt"), diff[:80])
+        self.assertTrue(diff.endswith("[diff truncated; read the files for the rest]\n"))
+        self.assertLess(len(diff), 400)
+
     def test_blocks_without_quorum(self):
         commit(self.repo, "feature.txt", "new\n")
         self.votes = [True, False, False]
