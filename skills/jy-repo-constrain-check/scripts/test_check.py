@@ -158,6 +158,58 @@ class BranchProtectionParseTest(unittest.TestCase):
             check.git, check.subprocess.run, check.shutil.which = orig_git, orig_run, orig_which
 
 
+def unix(files: dict[str, str]) -> check.Section:
+    with Fixture(files) as root:
+        return check.check_unix(root)
+
+
+CLI_PY = """import argparse, json, sys
+
+def main() -> int:
+    data = sys.stdin.read()
+    if not data:
+        print("no input", file=sys.stderr)
+        return 1
+    json.dump({"n": len(data)}, sys.stdout)
+    return 0
+
+sys.exit(main())
+"""
+
+
+class UnixTest(unittest.TestCase):
+    def test_app_repo_is_not_applicable(self):
+        s = unix(
+            {
+                "package.json": '{"dependencies": {"next": "14", "react": "18"}}',
+                "src/pages/index.tsx": "export default function Home() { return null }",
+            }
+        )
+        self.assertEqual(s.verdict, "N/A")
+        self.assertIn("类型初判：app 类", facts(s))
+
+    def test_cli_repo_collects_signals(self):
+        s = unix(
+            {
+                "pyproject.toml": '[project]\nname = "t"\n[project.scripts]\nt = "t.cli:main"\n',
+                "t/cli.py": CLI_PY,
+                "tests/test_cli.py": "import sys\ninput()\n",
+            }
+        )
+        self.assertEqual(s.verdict, "JUDGE")
+        self.assertIn("类型初判：工具类", facts(s))
+        for signal in ("读 stdin 1", "写 stderr 1", "显式退出码 1", "机器可读输出 1", "交互提问 0"):
+            self.assertIn(signal, facts(s))
+        self.assertFalse(any("tests/" in e for e in s.evidence))
+
+    def test_mixed_and_unknown(self):
+        s = unix({"package.json": '{"bin": {"t": "cli.js"}, "dependencies": {"express": "4"}}'})
+        self.assertIn("类型初判：两类都有", facts(s))
+        self.assertEqual(s.verdict, "JUDGE")
+        s = unix({"README.md": "# docs only\n"})
+        self.assertIn("类型初判：不确定", facts(s))
+
+
 class FilesUnderTest(unittest.TestCase):
     def test_skips_pycache_and_pyc(self):
         with Fixture(

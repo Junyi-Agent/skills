@@ -8,6 +8,7 @@ Usage: check.py [repo_path] [--no-remote]
 Prints one markdown section per check with a preliminary verdict:
   PASS / WARN / FAIL   decided from the facts alone
   JUDGE                facts found, the model must read the snippets and decide
+  N/A                  check does not apply (item 8 on an app repo)
 """
 
 from __future__ import annotations
@@ -767,6 +768,144 @@ def branch_protection(root: Path) -> str:
     return f"分支保护：`{branch}` 要求的检查 {checks or '（空）'}"
 
 
+# ---------- 8. Unix philosophy (tool repos only) ----------
+
+CODE_SUFFIXES = {
+    ".py", ".js", ".mjs", ".cjs", ".ts", ".go", ".rs", ".sh", ".bash", ".rb",
+    ".java", ".kt", ".swift", ".c", ".cc", ".cpp",
+}  # fmt: skip
+MAX_CODE_FILES = 400
+# (file, pattern): a declared command-line entry point
+CLI_DECL = [
+    ("pyproject.toml", r"(?m)^\[(project|tool\.poetry)\.scripts\]"),
+    ("setup.py", r"console_scripts"),
+    ("setup.cfg", r"console_scripts"),
+    ("package.json", r'"bin"\s*:'),
+    ("Cargo.toml", r"(?m)^\[\[bin\]\]"),
+]
+# (file, pattern): a package meant to be imported by other programs
+LIB_DECL = [
+    ("pyproject.toml", r"(?m)^\[project\]|^\[tool\.poetry\]"),
+    ("setup.py", r"setup\("),
+    ("package.json", r'"(main|exports|module)"\s*:'),
+    ("Cargo.toml", r"(?m)^\[lib\]"),
+    ("go.mod", r"(?m)^module\s"),
+]
+# (file, pattern): a user-facing app or long-running service
+APP_DECL = [
+    (
+        "package.json",
+        r'"(react|react-dom|vue|next|nuxt|svelte|@sveltejs/kit|@angular/core|'
+        r'express|koa|fastify|@nestjs/core|electron|react-native|expo)"\s*:',
+    ),
+    ("pyproject.toml", r"(?i)\b(django|flask|fastapi|streamlit|gradio)\b"),
+    ("requirements.txt", r"(?im)^(django|flask|fastapi|streamlit|gradio)\b"),
+    ("Gemfile", r"\brails\b"),
+    ("Dockerfile", r"(?m)^\s*EXPOSE\s"),
+    ("Procfile", r"(?m)^web:"),
+]
+APP_PATHS = ["android", "ios", "public/index.html", "src/components", "src/pages", "app/views"]
+CLI_CODE = re.compile(
+    r"\bargparse\b|\bimport click\b|\bfrom click\b|\btyper\b|\bclap::|cobra\.Command|"
+    r"\bflag\.Parse\(|\bcommander\b|\byargs\b|\bOptionParser\b|\bgetopts\b"
+)
+APP_CODE = re.compile(
+    r"\bFlask\(|\bFastAPI\(|\bapp\.listen\(|http\.ListenAndServe|createRoot\(|ReactDOM\.render"
+)
+UNIX_SIGNALS = [
+    ("读 stdin", re.compile(r"sys\.stdin|process\.stdin|os\.Stdin|io::stdin|\bfileinput\b|\bread -r\b")),
+    ("写 stderr", re.compile(r"sys\.stderr|console\.error|os\.Stderr|eprintln!|>&2")),
+    ("显式退出码", re.compile(r"sys\.exit\(|SystemExit|process\.exit\(|os\.Exit\(|process::exit|\bexit [0-9]")),
+    ("机器可读输出", re.compile(r"--json|json\.dumps?\(|JSON\.stringify|serde_json|--porcelain|--format\b")),
+    ("判断是否终端", re.compile(r"isatty|isTTY|NO_COLOR|IsTerminal|\batty\b|\[ -t [012] \]")),
+    ("交互提问", re.compile(
+        r"\binput\(|inquirer|readline\.question|click\.(prompt|confirm)|Confirm\.ask|\bread -p\b"
+    )),
+]  # fmt: skip
+
+
+TEST_FILE = re.compile(r"(^test_|_test\.|\.(test|spec)\.|^conftest\.py$)")
+TEST_DIRS = {"test", "tests", "__tests__", "spec", "testdata", "fixtures", "fixture"}
+SELF = Path(__file__).resolve()
+
+
+def code_files(root: Path) -> list[Path]:
+    """Source files of the repo itself: no tests, fixtures, or this script (its regexes match)."""
+    out = []
+    for p in walk(root, max_depth=6):
+        if TEST_FILE.search(p.name) or TEST_DIRS.intersection(p.relative_to(root).parts[:-1]):
+            continue
+        if p.resolve() == SELF:
+            continue
+        if p.suffix in CODE_SUFFIXES or (not p.suffix and read(p).startswith("#!")):
+            out.append(p)
+            if len(out) >= MAX_CODE_FILES:
+                break
+    return out
+
+
+def decl_hits(root: Path, decls: list[tuple[str, str]]) -> list[str]:
+    hits = []
+    for name, pat in decls:
+        p = root / name
+        if p.is_file():
+            hits += grep(root, p, re.compile(pat), limit=1)
+    return hits
+
+
+def check_unix(root: Path) -> Section:
+    s = Section(8, "工具类 repo 符合 Unix 设计哲学（app 类不适用）")
+    code = code_files(root)
+    cli = decl_hits(root, CLI_DECL)
+    lib = decl_hits(root, LIB_DECL)
+    app = decl_hits(root, APP_DECL)
+    app += [f"`{p}` 存在" for p in APP_PATHS if (root / p).exists()]
+    scripts = [f for f in code if read(f).startswith("#!")]
+    cli_code, app_code = [], []
+    for f in code:
+        cli_code += grep(root, f, CLI_CODE, limit=1)
+        app_code += grep(root, f, APP_CODE, limit=1)
+
+    tool_side = bool(cli or lib or scripts or cli_code)
+    app_side = bool(app or app_code)
+    kind = {
+        (True, False): "工具类",
+        (False, True): "app 类",
+        (True, True): "两类都有",
+        (False, False): "不确定",
+    }[(tool_side, app_side)]
+    s.facts.append(
+        f"类型初判：{kind}（CLI 入口声明 {len(cli)}，库声明 {len(lib)}，带 shebang 的脚本 "
+        f"{len(scripts)}，参数解析 {len(cli_code)} 处；app 信号 {len(app) + len(app_code)}）"
+    )
+    s.facts.append(
+        f"扫描了 {len(code)} 个代码文件" + ("（已达上限）" if len(code) >= MAX_CODE_FILES else "")
+    )
+    s.evidence += [f"工具：{e}" for e in (cli + lib + cli_code)[:4]]
+    s.evidence += [f"app：{e}" for e in (app + app_code)[:4]]
+
+    if kind == "app 类":
+        s.verdict = "N/A"
+        s.judge.append("确认是面向终端用户的 app 或服务；是的话第 8 项写“不适用”")
+        return s
+
+    counts = []
+    for label, pat in UNIX_SIGNALS:
+        hits = [h for f in code for h in grep(root, f, pat, limit=1)]
+        counts.append(f"{label} {len(hits)}")
+        s.evidence += [f"{label}：{h}" for h in hits[:2]]
+    s.facts.append("代码里的 Unix 信号（命中文件数）：" + "，".join(counts))
+    s.evidence = s.evidence[:20]
+    s.verdict = "JUDGE"
+    s.judge += [
+        "先定类型：主要给终端或其他程序用的是工具类；面向终端用户的应用或服务是 app 类，写“不适用”",
+        "工具类逐条核对 SKILL.md 第 8 项：单一职责、stdin/stdout/stderr 分工、机器可读输出、"
+        "非终端不带颜色、退出码、安静、不强制交互",
+        "“交互提问”命中的地方，确认有参数或 stdin 能跳过提问",
+    ]
+    return s
+
+
 # ---------- main ----------
 
 
@@ -786,6 +925,7 @@ def main() -> None:
         check_worktree_doc(root),
         check_enforcement(root, hooks),
         check_ci(root, remote),
+        check_unix(root),
     ]
     print(f"# 流程约束检查：{root}\n")
     print("| # | 检查项 | 初判 |\n|---|---|---|")
