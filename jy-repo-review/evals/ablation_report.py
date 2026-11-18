@@ -12,6 +12,7 @@ the pass rate in each config plus a verdict on the SKILL.md rule behind it:
   保留       only the full skill gets it done
   skill 失效 with_skill itself passes < THRESH: the rule is not working, fix it before judging
 """
+
 import json
 import sys
 from pathlib import Path
@@ -19,6 +20,10 @@ from pathlib import Path
 THRESH = 0.8
 CONFIGS = ["with_skill", "description_only", "without_skill"]
 EVALS = Path(__file__).resolve().parent
+
+
+def fmt(r):
+    return "-" if r is None else f"{r:.0%}"
 
 
 def grader_texts(case: str) -> dict[str, str]:
@@ -53,16 +58,23 @@ def main() -> None:
                 for e in json.loads(g.read_text())["expectations"]:
                     stem = texts.get(e["text"].strip())
                     if stem is None:
-                        print(f"warning: {case}/{c}: unmatched expectation: {e['text'][:60]}", file=sys.stderr)
+                        print(
+                            f"warning: {case}/{c}: unmatched expectation: {e['text'][:60]}",
+                            file=sys.stderr,
+                        )
                         continue
                     tally[stem][c][0] += bool(e["passed"])
                     tally[stem][c][1] += 1
-        lines += [f"## {case}", "",
-                  "runs: " + ", ".join(f"{c}={nruns[c]}" for c in CONFIGS), "",
-                  "| 断言 | 规则 | 类型 | full | desc | none | 结论 |", "|---|---|---|---|---|---|---|"]
+        lines += [
+            f"## {case}",
+            "",
+            "runs: " + ", ".join(f"{c}={nruns[c]}" for c in CONFIGS),
+            "",
+            "| 断言 | 规则 | 类型 | full | desc | none | 结论 |",
+            "|---|---|---|---|---|---|---|",
+        ]
         for stem in sorted(tally):
             rate = {c: (p / n if n else None) for c, (p, n) in tally[stem].items()}
-            fmt = lambda r: "-" if r is None else f"{r:.0%}"
             full, desc, none = rate["with_skill"], rate["description_only"], rate["without_skill"]
             if full is not None and full < THRESH:
                 verdict = "skill 失效"
@@ -73,8 +85,10 @@ def main() -> None:
             else:
                 verdict = "保留"
             m = rule_map.get(case, {}).get(stem, {})
-            lines.append(f"| {stem} | {m.get('rule', '?')} | {m.get('kind', '?')} | "
-                         f"{fmt(full)} | {fmt(desc)} | {fmt(none)} | {verdict} |")
+            lines.append(
+                f"| {stem} | {m.get('rule', '?')} | {m.get('kind', '?')} | "
+                f"{fmt(full)} | {fmt(desc)} | {fmt(none)} | {verdict} |"
+            )
         lines.append("")
     text = "\n".join(lines)
     print(text)
