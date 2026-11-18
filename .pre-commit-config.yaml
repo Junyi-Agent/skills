@@ -18,3 +18,11 @@ repos:
     hooks:
       - id: shellcheck
         args: [--severity=warning]
+  - repo: local
+    hooks:
+      - id: git-guard-tests
+        name: git guard hook tests
+        entry: python3 .claude/hooks/test_git_guard.py
+        language: system
+        files: ^\.claude/hooks/
+        pass_filenames: false
