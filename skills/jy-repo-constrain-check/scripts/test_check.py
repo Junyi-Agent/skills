@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import subprocess
@@ -266,6 +267,27 @@ class CliTest(unittest.TestCase):
             self.assertEqual(r.returncode, 2, args)
             self.assertEqual(r.stdout, "", args)
             self.assertIn("Usage", r.stderr, args)
+
+    def test_rejects_missing_or_non_directory_path(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            f = Path(tmp) / "file.txt"
+            f.write_text("x")
+            for path in (str(Path(tmp) / "missing"), str(f)):
+                r = self.run_cli(path, "--no-remote")
+                self.assertEqual(r.returncode, 2, path)
+                self.assertEqual(r.stdout, "", path)
+                self.assertIn("not a directory", r.stderr, path)
+
+    def test_json_output(self):
+        with Fixture({"README.md": "# x\n"}) as root:
+            r = self.run_cli(str(root), "--no-remote", "--json")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        data = json.loads(r.stdout)
+        self.assertEqual([s["num"] for s in data["sections"]], list(range(1, 9)))
+        for s in data["sections"]:
+            self.assertIn(s["verdict"], {"PASS", "WARN", "FAIL", "JUDGE", "N/A"})
+            for key in ("title", "facts", "evidence", "judge"):
+                self.assertIn(key, s)
 
     def test_help(self):
         r = self.run_cli("--help")
