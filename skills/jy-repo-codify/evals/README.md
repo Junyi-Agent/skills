@@ -4,7 +4,7 @@
 
 ## 组成
 
-- `fixture/build_feeds.sh`：在当前目录生成一个小型 Python repo（feeds），埋了几类经验线索：反复修的错（C1）、REVIEW.md 里报过两次的问题（C2）、已被 lint 覆盖的规则（E1）、已知的故意设计（K1）、无法机械检查的规则（J1）。每项说明见脚本头部注释。commit 时间和作者固定，HEAD 是 `e8e9bb3`。
+- `fixture/build_feeds.sh create repo`：在当前目录生成一个小型 Python repo（feeds），埋了几类经验线索：反复修的错（C1）、REVIEW.md 里报过两次的问题（C2）、已被 lint 覆盖的规则（E1）、已知的故意设计（K1）、无法机械检查的规则（J1）。每项说明见脚本头部注释。commit 时间和作者固定，HEAD 是 `e8e9bb3`。
 - `collect-candidates/`：没有指定纠正，走“收集候选”入口。期望列出带出处的候选、排序、排除已覆盖和故意设计的条目，然后停下来让用户选，不改仓库。
 - `codify-correction/`：用户给了具体纠正（又直接调了 `urlopen`），走“刚纠正过”入口，期望把它固化成 lint 规则并完成双向验证。
 - 每个 case 下 `prompt.md` 是用户原话，`graders/` 每个文件一条断言。
@@ -13,7 +13,7 @@
 
 ## 跑触发测试
 
-改了 description 就跑。用 skill-creator 的 `run_eval.py`，在 repo 之外新建一个目录，在里面执行 `fixture/build_feeds.sh` 生成项目。query 说的“这个仓库”要真实存在，否则模型会先去查看目录，第一个工具调用就不是 skill 了，而 `run_eval.py` 只看第一个工具调用。
+改了 description 就跑。用 skill-creator 的 `run_eval.py`，在 repo 之外新建一个目录，在里面执行 `fixture/build_feeds.sh create repo` 生成项目。query 说的“这个仓库”要真实存在，否则模型会先去查看目录，第一个工具调用就不是 skill 了，而 `run_eval.py` 只看第一个工具调用。
 
 - 这个目录的 `.claude/skills/` 要软链接本仓库其他的 `jy-*` skill，这样不应触发的 query 才有竞争对手。不要链接 jy-repo-codify 本身，`run_eval.py` 会自己注册它。
 - `claude` 要在载入 zsh 环境后调用（`zsh -lic`），否则会报未登录。

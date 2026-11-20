@@ -8,7 +8,7 @@ Reads <case>/<config>/run-*/grading.json for config in with_skill, description_o
 matches each expectation to a grader file by its statement text, and prints, per assertion,
 the pass rate in each config plus a verdict on the SKILL.md rule behind it. -o text (default)
 prints markdown tables, -o json one object per case. Exits 2 on a bad argument.
-
+Verdicts:
 
   可删       without_skill passes >= THRESH: the model does this unprompted
   可压缩     description_only passes >= THRESH but without_skill does not: one line is enough
@@ -139,6 +139,8 @@ def main() -> None:
     case_dirs = sorted(p for p in it.iterdir() if p.is_dir() and (EVALS / p.name).is_dir())
     if args.cases:
         case_dirs = [p for p in case_dirs if p.name in args.cases]
+        for c in sorted(set(args.cases) - {p.name for p in case_dirs}):
+            print(f"warning: no runs for case {c} in {it}", file=sys.stderr)
     results = [case_result(d, rule_map) for d in case_dirs]
     if args.output == "json":
         print(json.dumps({"cases": results}, ensure_ascii=False, indent=2))
