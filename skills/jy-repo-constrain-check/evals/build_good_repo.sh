@@ -6,8 +6,15 @@
 # docs/adr/0004-cli-exempt.md listed as an exemption ADR (状态：采纳),
 # everything else JUDGE or PASS.
 #
-#   mkdir /tmp/good && cd /tmp/good && bash build_good_repo.sh && python3 ../scripts/check.py . --no-remote
+#   mkdir /tmp/good && cd /tmp/good && bash <evals>/build_good_repo.sh create repo &&
+#     python3 <scripts>/check.py get checks --no-remote
+#
+# Exits 2 on any other arguments.
 set -euo pipefail
+if [ $# -ne 2 ] || [ "$1" != create ] || [ "$2" != repo ]; then
+  echo "usage: build_good_repo.sh create repo" >&2
+  exit 2
+fi
 git init -q -b main .
 mkdir -p docs/adr scripts .github/workflows .claude/hooks
 echo '状态定义：提议 = 只写了 ADR 文档；采纳 = 允许去实现，可能已经实现；已验证 = 人类测试了代码并确认了实现的内容。' > docs/adr/README.md

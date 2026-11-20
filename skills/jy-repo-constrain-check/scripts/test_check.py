@@ -342,26 +342,34 @@ class CliTest(unittest.TestCase):
             check=False,
         )
 
-    def test_rejects_unknown_arguments(self):
-        for args in (["--no-remot"], ["-x"], [".", "extra"]):
+    def test_rejects_bad_arguments(self):
+        for args in (
+            [],
+            ["get"],
+            ["list", "checks"],
+            ["get", "pods"],
+            ["get", "checks", "--no-remot"],
+            ["get", "checks", "9"],
+            ["get", "checks", "-o", "yaml"],
+        ):
             r = self.run_cli(*args)
             self.assertEqual(r.returncode, 2, args)
             self.assertEqual(r.stdout, "", args)
-            self.assertIn("Usage", r.stderr, args)
+            self.assertIn("usage:", r.stderr, args)
 
     def test_rejects_missing_or_non_directory_path(self):
         with tempfile.TemporaryDirectory() as tmp:
             f = Path(tmp) / "file.txt"
             f.write_text("x")
             for path in (str(Path(tmp) / "missing"), str(f)):
-                r = self.run_cli(path, "--no-remote")
+                r = self.run_cli("get", "checks", "--repo", path, "--no-remote")
                 self.assertEqual(r.returncode, 2, path)
                 self.assertEqual(r.stdout, "", path)
                 self.assertIn("not a directory", r.stderr, path)
 
     def test_json_output(self):
         with Fixture({"README.md": "# x\n"}) as root:
-            r = self.run_cli(str(root), "--no-remote", "--json")
+            r = self.run_cli("get", "checks", "--repo", str(root), "--no-remote", "-o", "json")
         self.assertEqual(r.returncode, 0, r.stderr)
         data = json.loads(r.stdout)
         self.assertEqual([s["num"] for s in data["sections"]], list(range(1, 9)))
@@ -370,10 +378,21 @@ class CliTest(unittest.TestCase):
             for key in ("title", "facts", "evidence", "judge"):
                 self.assertIn(key, s)
 
+    def test_selects_checks_by_number(self):
+        with Fixture({"README.md": "# x\n"}) as root:
+            r = self.run_cli("get", "checks", "8", "1", "--repo", str(root), "--output", "json")
+            t = self.run_cli("get", "checks", "5", "--repo", str(root))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual([s["num"] for s in json.loads(r.stdout)["sections"]], [1, 8])
+        self.assertEqual(t.returncode, 0, t.stderr)
+        self.assertIn("## 5.", t.stdout)
+        self.assertNotIn("## 1.", t.stdout)
+
     def test_help(self):
-        r = self.run_cli("--help")
-        self.assertEqual(r.returncode, 0)
-        self.assertIn("Usage", r.stdout)
+        for args in (["--help"], ["get", "checks", "--help"]):
+            r = self.run_cli(*args)
+            self.assertEqual(r.returncode, 0, args)
+            self.assertIn("usage:", r.stdout, args)
 
 
 if __name__ == "__main__":

@@ -4,7 +4,7 @@
 
 ## 组成
 
-- `fixture/build_kvs.sh`：在当前目录生成一个小型 Python repo（kvs），埋了真 bug、文档漂移、死代码、动态分发的“假死代码”、有提交说明的故意设计、CLAUDE.md 清单里的故意设计、无说明的可疑处、一个未提交文件。每项的编号和说明见脚本头部注释。commit 时间和作者固定，hash 可复现（full 的 HEAD 是 `d8a3a01`，incremental 的 HEAD 是 `abe905f`）
+- `fixture/build_kvs.sh create repo full|incremental`：在当前目录生成一个小型 Python repo（kvs），埋了真 bug、文档漂移、死代码、动态分发的“假死代码”、有提交说明的故意设计、CLAUDE.md 清单里的故意设计、无说明的可疑处、一个未提交文件。每项的编号和说明见脚本头部注释。commit 时间和作者固定，hash 可复现（full 的 HEAD 是 `d8a3a01`，incremental 的 HEAD 是 `abe905f`）
 - `full-review-kvs/`、`incremental-review-kvs/`：两个 case，`prompt.md` 是用户原话，`graders/` 每个文件一条断言
 - `rule-map.json`：每条断言对应 SKILL.md 的哪条规则，以及类型（`preference` 你的偏好 / `practice` 通用做法）
 - `variants/description-only/SKILL.md`：只保留 description 的版本
@@ -27,7 +27,7 @@
 3. 执行 agent 要把以下内容存到 `outputs/`：最终的 REVIEW.md、最后一条回复、`transcript.md`（每一步做了什么，含所有 subagent 的完整 prompt），以及跑完后 repo 的 `git status --porcelain` 和 `git log --oneline`
 4. 按 `graders/` 打分，写 `grading.json`（`expectations[].text` 必须与 grader 正文逐字一致）
 5. `python -m scripts.aggregate_benchmark <iteration>`（在 skill-creator 目录下）得到总体通过率
-6. `python3 evals/ablation_report.py <iteration> --out <iteration>/ablation.md` 得到逐条结论
+6. `python3 evals/ablation_report.py get verdicts --iteration <iteration> > <iteration>/ablation.md` 得到逐条结论（`-o json` 输出 JSON，在 `verdicts` 后写 case 名只看这几个 case）
 
 ## 读结论
 

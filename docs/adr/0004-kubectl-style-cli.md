@@ -16,7 +16,7 @@
 ## 后果
 
 - 检查方式是正则找线索加 agent 判断，识别不了的参数解析写法（手写 `sys.argv` 分发等）要靠 agent 读入口代码。
-- 本仓库自己的 `check.py`、`ablation_report.py` 目前不是这种结构，需要改造或由人类批准豁免。
+- 本仓库自己的入口已按这个结构改造（用户 2026-11-20 选择改造、不豁免）：`check.py get checks`、`ablation_report.py get verdicts`、三个 eval fixture 脚本 `build_kvs.sh` / `build_feeds.sh` / `build_good_repo.sh` 的 `create repo`。`git_guard.py`、`review_gate.py` 是 hook，`place-files.sh` 由 eval 框架无参数调用，不在范围内。
 
 ## 验证
 

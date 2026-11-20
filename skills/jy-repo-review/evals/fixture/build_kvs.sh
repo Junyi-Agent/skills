@@ -1,9 +1,12 @@
 #!/usr/bin/env bash
 # Builds the kvs fixture repo used by the jy-repo-review evals, in the current directory.
 #
-#   build_kvs.sh full         history up to the "baseline" commit, plus one uncommitted file
-#   build_kvs.sh incremental  same history, a committed REVIEW.md from an earlier review,
-#                             then three later commits (a partial fix, a full fix, a new bug)
+#   build_kvs.sh create repo full         history up to the "baseline" commit, plus one
+#                                         uncommitted file
+#   build_kvs.sh create repo incremental  same history, a committed REVIEW.md from an earlier
+#                                         review, then three later commits (a partial fix,
+#                                         a full fix, a new bug)
+# Exits 2 on any other arguments.
 #
 # Planted items (the graders refer to these ids; see ../rule-map.json):
 #   B1  Store.delete neither marks the store dirty nor takes the lock -> deletes are lost on flush,
@@ -22,7 +25,13 @@
 #   (incremental only)
 #   N1  Store.rename deletes the key when old == new
 set -euo pipefail
-MODE="${1:-full}"
+usage() {
+  echo "usage: build_kvs.sh create repo full|incremental" >&2
+  exit 2
+}
+if [ $# -ne 3 ] || [ "$1" != create ] || [ "$2" != repo ]; then usage; fi
+MODE="$3"
+case "$MODE" in full | incremental) ;; *) usage ;; esac
 
 export GIT_AUTHOR_NAME="kvs dev" GIT_AUTHOR_EMAIL="dev@example.invalid"
 export GIT_COMMITTER_NAME="kvs dev" GIT_COMMITTER_EMAIL="dev@example.invalid"

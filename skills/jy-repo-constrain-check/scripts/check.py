@@ -3,10 +3,10 @@
 
 Read-only: never writes, never runs hooks or tests. Stdlib only.
 
-Usage: check.py [repo_path] [--no-remote] [--json]
-Exits 2 on an unknown argument or when repo_path is not a directory.
+Usage: check.py get checks [NUM ...] [--repo PATH] [-o text|json] [--no-remote]
+Exits 2 on a bad argument or when --repo is not a directory.
 
-Prints one markdown section per check (or, with --json, one JSON object with a
+Prints one markdown section per check (or, with -o json, one JSON object with a
 "sections" list) with a preliminary verdict:
   PASS / WARN / FAIL   decided from the facts alone
   JUDGE                facts found, the model must read the snippets and decide
@@ -15,6 +15,7 @@ Prints one markdown section per check (or, with --json, one JSON object with a
 
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import re
@@ -1032,42 +1033,60 @@ def check_unix(root: Path) -> Section:
 # ---------- main ----------
 
 
-USAGE = "Usage: check.py [repo_path] [--no-remote] [--json]"
-FLAGS = {"--no-remote", "--json"}
+CHECKS = range(1, 9)
+
+
+def parse_args(argv: list[str]) -> argparse.Namespace:
+    p = argparse.ArgumentParser(
+        prog="check.py",
+        allow_abbrev=False,
+        description="Collect facts about a repo's workflow constraints (read-only).",
+    )
+    verbs = p.add_subparsers(dest="verb", required=True, metavar="VERB")
+    get = verbs.add_parser("get", allow_abbrev=False, help="run checks and print the results")
+    resources = get.add_subparsers(dest="resource", required=True, metavar="RESOURCE")
+    checks = resources.add_parser(
+        "checks",
+        allow_abbrev=False,
+        help="the eight workflow checks",
+        description="Run the eight workflow checks.",
+    )
+    checks.add_argument(
+        "names", nargs="*", type=int, metavar="NUM", help="check numbers 1-8 (default: all)"
+    )
+    checks.add_argument("--repo", default=".", help="repo to check (default: .)")
+    checks.add_argument("-o", "--output", choices=["text", "json"], default="text")
+    checks.add_argument(
+        "--no-remote", action="store_true", help="skip the GitHub branch protection query"
+    )
+    args = p.parse_args(argv)
+    bad = [n for n in args.names if n not in CHECKS]
+    if bad:
+        checks.error(f"no such check: {', '.join(map(str, bad))} (choose from 1-8)")
+    if not Path(args.repo).is_dir():
+        checks.error(f"not a directory: {Path(args.repo).resolve()}")
+    return args
 
 
 def main() -> None:
-    argv = sys.argv[1:]
-    if "-h" in argv or "--help" in argv:
-        print(__doc__)
-        return
-    unknown = [a for a in argv if a.startswith("-") and a not in FLAGS]
-    args = [a for a in argv if not a.startswith("-")]
-    if unknown or len(args) > 1:
-        bad = " ".join(unknown or args[1:])
-        print(f"check.py: unexpected argument: {bad}", file=sys.stderr)
-        print(USAGE, file=sys.stderr)
-        sys.exit(2)
-    root = Path(args[0] if args else ".").resolve()
-    if not root.is_dir():
-        print(f"check.py: not a directory: {root}", file=sys.stderr)
-        sys.exit(2)
-    remote = "--no-remote" not in argv
+    args = parse_args(sys.argv[1:])
+    root = Path(args.repo).resolve()
     top = git(root, "rev-parse", "--show-toplevel")
     if top:
         root = Path(top)
     hooks = installed_hooks(hooks_dir(root)) if top else []
-    sections = [
-        check_adr(root),
-        check_git_precommit(root, hooks),
-        check_fmt_lint(root, hooks),
-        check_agent_gate(root, hooks),
-        check_worktree_doc(root),
-        check_enforcement(root, hooks),
-        check_ci(root, remote),
-        check_unix(root),
-    ]
-    if "--json" in argv:
+    run = {
+        1: lambda: check_adr(root),
+        2: lambda: check_git_precommit(root, hooks),
+        3: lambda: check_fmt_lint(root, hooks),
+        4: lambda: check_agent_gate(root, hooks),
+        5: lambda: check_worktree_doc(root),
+        6: lambda: check_enforcement(root, hooks),
+        7: lambda: check_ci(root, not args.no_remote),
+        8: lambda: check_unix(root),
+    }
+    sections = [run[n]() for n in sorted(set(args.names or CHECKS))]
+    if args.output == "json":
         out = {"root": str(root), "sections": [s.to_dict() for s in sections]}
         print(json.dumps(out, ensure_ascii=False, indent=2))
         return
