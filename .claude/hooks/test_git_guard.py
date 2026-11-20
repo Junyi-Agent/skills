@@ -125,6 +125,68 @@ class GitGuardTest(unittest.TestCase):
         self.assertTrue(self.denied("echo it's && git commit -m x", self.feat))
         self.assertFalse(self.denied("echo it's", self.feat))
 
+    def test_heredoc_data_is_not_a_script(self):
+        for cmd in (
+            "cat > notes.md <<'EOF'\ngit switch main\nEOF",
+            "gh pr create --title t --body-file - <<'EOF'\nRun:\ngit checkout -b foo\nEOF",
+            "git commit -F - <<'EOF'\nDocs\n\ngit push origin main is blocked\nEOF",
+            "tee x.md <<EOF >/dev/null\ngit commit -m x\nEOF",
+        ):
+            self.assertFalse(self.denied(cmd, self.feat), cmd)
+
+    def test_heredoc_fed_to_shell_runs_in_its_context(self):
+        body = "<<'EOF'\ngit commit -m x\nEOF"
+        self.assertTrue(self.denied(f"cd {self.main} && bash {body}", self.feat))
+        self.assertFalse(self.denied(f"cd {self.feat} && bash {body}", self.main))
+        self.assertTrue(self.denied(f"bash -s {body}", self.main))
+        text = "\ngit commit -m x\nEOF"
+        self.assertTrue(self.denied(f"cat <<'EOF' | sh{text}", self.main))
+        self.assertTrue(self.denied(f"cat <<'EOF' |& bash -e{text}", self.main))
+        self.assertFalse(self.denied(f"cat <<'EOF' || bash{text}", self.main))  # not a pipe
+        self.assertFalse(self.denied(f"cat <<'EOF' | grep x{text}", self.main))
+        self.assertTrue(
+            self.denied("SKIP=review-gate bash <<'EOF'\ngit push origin feature\nEOF", self.feat)
+        )
+        # a shell-fed body is a script: unparseable with git in it is denied
+        self.assertTrue(self.denied("bash <<'EOF'\ngit commit -m x\necho it's\nEOF", self.main))
+
+    def test_comments(self):
+        for cmd in (
+            "echo hi # note\ngit commit -m x",
+            "# step 1\ngit commit -m x",
+            "echo a#b\ngit commit -m x",
+            "echo a#b; git commit -m x",
+            "curl -s http://x/#frag\ngit commit -m x",
+            "echo $# ; git commit -m x",
+            "bash <<'EOF'\n# don't\ngit commit -m x\nEOF",
+        ):
+            self.assertTrue(self.denied(cmd, self.main), cmd)
+        # on one line, everything after an unquoted `#` word is a comment, as in the shell
+        self.assertFalse(self.denied("echo hi # git commit -m x", self.main))
+        self.assertTrue(self.denied("git commit -m 'fix #12'", self.main))
+
+    def test_agent_style_commands(self):
+        """Multi-line commands in the shape agents write: comments, URLs, heredocs."""
+        main, feat = self.main, self.feat
+        deny_on_main = [
+            "# Check the state first\ngit status\n\n# Then commit\ngit add -A && git commit -m x",
+            f"cd {main}\n# open the docs: https://example.invalid/guide#setup\ngit commit -m x",
+            "git commit -q -m \"$(cat <<'EOF'\nFix the parser\n\nDon't drop lines\nEOF\n)\"",
+            "git add a.py && git commit -q -F - <<'EOF'\nAdd thing\n\nIt's done.\nEOF",
+            "for f in a b; do echo $f; done  # loop\ngit commit -m x",
+        ]
+        allow_on_feat = [
+            "# Check the state first\ngit status\n\n# Then commit\ngit add -A && git commit -m x",
+            "gh pr create --base main --title t --body-file - <<'EOF'\n## Summary\n"
+            "- Don't run `git switch main` in place.\ngit checkout -b example\nEOF",
+            "cat > notes.md <<'EOF'\n# Notes\ngit push origin main  # blocked by the hook\nEOF",
+            "git push -u origin feature 2>&1 | tail -30",
+        ]
+        for cmd in deny_on_main:
+            self.assertTrue(self.denied(cmd, main), cmd)
+        for cmd in allow_on_feat:
+            self.assertFalse(self.denied(cmd, feat), cmd)
+
     def test_subshell_scopes_cd(self):
         self.assertTrue(self.denied(f"(cd {self.main} && git commit -m x)", self.feat))
         self.assertTrue(self.denied(f"(cd {self.main}&&git commit -m x)", self.feat))
@@ -150,6 +212,10 @@ class GitGuardTest(unittest.TestCase):
             f"env -C {self.main} git commit -m x",
             f"env --chdir={self.main} git commit -m x",
             f"pushd {self.main} && git commit -m x",
+            "env -S 'git push origin main'",
+            "env '-Sgit push origin main'",
+            "env --split-string='git push origin main'",
+            "env -S 'SKIP=review-gate git push'",
         ):
             self.assertTrue(self.denied(cmd, self.feat), cmd)
         self.assertFalse(self.denied("env FOO=1 git push", self.feat))

@@ -110,3 +110,15 @@ tags: [#review]
   - README 的安装步骤：会往 `~/.claude/skills` 写软链接。
   - `review_gate.py` 的真实 `claude` 调用：每次要起 3 个 Claude。
   - ablation 的完整 eval 流程：需要 18 次完整审查，这次范围也没改到它。
+
+## 8. 后续处理（2026-11-20）
+
+- 第 2 节的 6 条全部在 `fix-review-3` 分支修复，每条都有测试；新测试在修复前的代码上都会失败。
+  - `#` 注释：`strip_redirections` 只在词首把 `#` 当注释，跳到行尾；`shlex` 的 `commenters` 关掉。
+  - heredoc：正文在命令里留一个标记词，跟着所属命令走。只有喂给 shell 的正文（`bash <<EOF`、`cat <<EOF | bash`）才按脚本检查，用这个 shell 的 cwd 和前缀变量，解析失败且提到 git 时拒绝；其他正文是数据，不检查。`strict` 参数去掉了。
+  - `env -S` / `--split-string` 展开后继续解析。
+  - `check.py`：`on:` 下零缩进的列表能读到；`WEAK` 去掉 `verbose: true`。
+- 新增 `test_agent_style_commands`：按 agent 平时写的多行命令（注释、URL、heredoc 写的提交说明和 PR 正文）构造的回归语料，对应第 6 节说的漏报原因。
+- 另修了 push 时发现的问题：`review_gate.py` 在 `claude` 失败时只打印 stderr，而 `--output-format json` 把错误（如 “Not logged in”）放在 stdout 的 `result` 里，所以拒绝信息是空的。现在两处都会打印。
+- ADR 0001 同步了 heredoc、注释、`env -S` 的写法。
+- 下次增量审查仍以 `4904591` 为基线，范围包括 #13、#14 和这次的修复。

@@ -9,10 +9,12 @@ passed (`gh pr merge`, or the merge endpoint through `gh api`).
 The branch is read from the directory each git command actually runs in: `cd <dir>`,
 `pushd`/`popd` earlier in the same command, `( ... )` subshells, `env -C <dir>` and
 `git -C <dir>` are all followed. Wrappers are looked through: `env VAR=x`, `command`,
-`exec`, `nohup`, `time` (with their options), and `bash -c '...'`, which also inherits
-the `VAR=x` words in front of it. Git aliases are expanded. Heredoc bodies are checked as
-scripts of their own. If the hook input cannot be read, the check itself fails, or a
-command that mentions git/gh cannot be parsed, the command is denied.
+`exec`, `nohup`, `time`, `env -S` (with their options), and `bash -c '...'`, which also
+inherits the `VAR=x` words in front of it. Git aliases are expanded. A heredoc body fed to
+a shell (`bash <<EOF`, or `cat <<EOF | bash`) is checked as a script, in the directory
+and environment of that shell; other heredoc bodies are data and are not checked. Shell
+comments are skipped. If the hook input cannot be read, the check itself fails, or a
+command (or shell-fed heredoc) that mentions git/gh cannot be parsed, it is denied.
 """
 
 from __future__ import annotations
@@ -86,15 +88,20 @@ GH_VALUE_OPTS = {
 
 REDIRECT_OPS = ("&>>", "&>", "<<<", "<<-", "<<", ">>", ">&", ">|", "<&", "<>", ">", "<")
 WORD_END = set(" \t\n;&|<>()")
+# Word left in place of a heredoc: HEREDOC + index into the bodies list. NUL cannot occur
+# in a real shell word, so the marker cannot be forged by the command text.
+HEREDOC = "\x00heredoc:"
 
 
 def strip_redirections(command: str) -> tuple[str, list[str]]:
-    """Drop shell redirections (`2>&1`, `> log`, `<<EOF`) outside quotes, with their targets.
+    """Drop shell redirections (`2>&1`, `> log`, `<<EOF`) and comments outside quotes.
 
     Without this, `gh pr merge 6 2>&1` would pass `2>` to `gh pr checks` as the PR selector.
     A leading fd number counts only when it is the whole unquoted word, as in the shell.
-    Heredoc bodies are cut out of the command too, and returned separately: they are data
-    for the command (where an apostrophe is fine), or a script when fed to a shell.
+    A `#` starts a comment only at the start of a word (`a#b` and `$#` are not comments).
+    Heredoc bodies are cut out of the command and returned separately, so an apostrophe
+    in them does not break parsing; each leaves a HEREDOC marker word in its command, so
+    the caller knows which command reads it.
     """
     out: list[str] = []
     bodies: list[str] = []
@@ -123,6 +130,10 @@ def strip_redirections(command: str) -> tuple[str, list[str]]:
             out.append(c)
             i += 1
             continue
+        if c == "#" and word_start == len(out):  # comment: skip to the end of the line
+            j = command.find("\n", i)
+            i = n if j < 0 else j
+            continue
         op = next((o for o in REDIRECT_OPS if command.startswith(o, i)), "")
         if op and not command.startswith("(", i + len(op)):  # `<(..)` is process substitution
             word = "".join(out[word_start:])
@@ -144,6 +155,7 @@ def strip_redirections(command: str) -> tuple[str, list[str]]:
                 i += 1
             if op in ("<<", "<<-"):
                 delim = re.sub(r"[\"'\\]", "", command[start:i])
+                out.append(f" {HEREDOC}{len(bodies) + len(pending)}")
                 pending.append((delim, op == "<<-"))
             out.append(" ")
             word_start, word_quoted = len(out), False
@@ -171,19 +183,23 @@ def strip_redirections(command: str) -> tuple[str, list[str]]:
 def segments(command: str) -> tuple[list[list[str]], list[str]]:
     """Split a command line into simple commands; also return its heredoc bodies.
 
-    `(` and `)` come back as one-word segments so the caller can scope `cd` to a subshell.
+    `(` and `)` come back as one-word segments so the caller can scope `cd` to a subshell,
+    and a pipe `|` as `["|"]` so it can pass a heredoc on to the next command.
     """
     command, bodies = strip_redirections(command)
     lexer = shlex.shlex(command.replace("\n", " ; "), posix=True, punctuation_chars=PUNCT)
     lexer.whitespace_split = True
+    lexer.commenters = ""  # strip_redirections already dropped the comments
     out: list[list[str]] = [[]]
     for tok in lexer:
         if not tok or any(c not in PUNCT for c in tok):
             out[-1].append(tok)
             continue
-        for c in tok:  # a punctuation run such as `)&&` or `((`
+        for j, c in enumerate(tok):  # a punctuation run such as `)&&`, `((` or `|&`
             if c in "()":
                 out += [[c], []]
+            elif c == "|" and "||" not in tok[max(j - 1, 0) : j + 2]:
+                out += [["|"], []]
             elif out[-1]:
                 out.append([])
     return [s for s in out if s], bodies
@@ -222,6 +238,12 @@ def unwrap(seg: list[str], cwd: str) -> tuple[list[str], set[str], str]:
                 elif opt.startswith("--chdir="):
                     cwd = resolve(cwd, opt.split("=", 1)[1])
                     seg = seg[1:]
+                elif opt in ("-S", "--split-string") and len(seg) > 1:
+                    seg = shlex.split(seg[1]) + seg[2:]  # `env -S 'git push'`
+                elif opt.startswith("--split-string="):
+                    seg = shlex.split(opt.split("=", 1)[1]) + seg[1:]
+                elif opt.startswith("-S") and len(opt) > 2:
+                    seg = shlex.split(opt[2:]) + seg[1:]
                 else:
                     seg = seg[2:] if opt in ENV_VALUE_OPTS else seg[1:]
         elif word in WRAPPERS:
@@ -241,6 +263,16 @@ def shell_script(seg: list[str]) -> str | None:
         if re.fullmatch(r"-[a-zA-Z]*c[a-zA-Z]*", a):
             return seg[i + 1]
     return None
+
+
+def reads_script_from_stdin(seg: list[str]) -> bool:
+    """`bash`, `sh -e`, `bash -s arg` ...: a shell that runs whatever comes on stdin."""
+    if not seg or os.path.basename(seg[0]) not in SHELLS:
+        return False
+    args = seg[1:]
+    return all(a.startswith(("-", "+")) for a in args) or any(
+        re.fullmatch(r"-[a-zA-Z]*s[a-zA-Z]*", a) for a in args
+    )
 
 
 def resolve(base: str, path: str) -> str:
@@ -432,34 +464,34 @@ def check_git(seg: list[str], cwd: str, flags: set[str]) -> str | None:
     return None
 
 
-def check(
-    command: str, cwd: str, inherited: set[str] | None = None, strict: bool = True
-) -> str | None:
+def check(command: str, cwd: str, inherited: set[str] | None = None) -> str | None:
     """Return the reason to deny `command` run in `cwd`, or None to allow it.
 
-    `inherited` holds env_flags set by the caller (`SKIP=x bash -c '...'`). With
-    `strict`, an unparseable command that mentions git/gh is denied; heredoc bodies are
-    checked without it, since they are usually text, not scripts.
+    `inherited` holds env_flags set by the caller (`SKIP=x bash -c '...'`).
     """
     inherited = inherited or set()
     try:
         segs, bodies = segments(command)
     except ValueError:  # unbalanced quotes
-        return PARSE_MSG if strict and GIT_WORD.search(command) else None
-    for body in bodies:  # `bash <<EOF` runs its body
-        reason = check(body, cwd, inherited, strict=False)
-        if reason:
-            return reason
+        return PARSE_MSG if GIT_WORD.search(command) else None
     stack: list[str] = []  # cwd outside each `( ... )`
     dirs: list[str] = []  # pushd stack
+    piped: list[str] = []  # heredoc bodies of the previous command, if it pipes into this one
+    last: list[str] = []  # heredoc bodies of the previous command
     for raw in segs:
+        if raw == ["|"]:
+            piped = last
+            continue
+        stdin, piped = piped, []
         if raw == ["("]:
             stack.append(cwd)
             continue
         if raw == [")"]:
             cwd = stack.pop() if stack else cwd
             continue
-        seg, flags, seg_cwd = unwrap(raw, cwd)
+        last = [bodies[int(w[len(HEREDOC) :])] for w in raw if w.startswith(HEREDOC)]
+        stdin = last + stdin
+        seg, flags, seg_cwd = unwrap([w for w in raw if not w.startswith(HEREDOC)], cwd)
         flags |= inherited
         if not seg:
             continue
@@ -468,6 +500,12 @@ def check(
             reason = check(script, seg_cwd, flags)
             if reason:
                 return reason
+            continue
+        if reads_script_from_stdin(seg):  # `bash <<EOF` or `cat <<EOF | bash`
+            for body in stdin:
+                reason = check(body, seg_cwd, flags)
+                if reason:
+                    return reason
             continue
         if seg[0] == "cd":
             cwd = resolve(cwd, seg[1]) if len(seg) > 1 else os.path.expanduser("~")

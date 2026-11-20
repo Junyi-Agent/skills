@@ -113,6 +113,18 @@ class ReviewGateTest(unittest.TestCase):
         ):
             self.assertFalse(parse_output("x", bad).approve, bad)
 
+    def test_failure_shows_the_reason(self):
+        def proc(stdout: str, stderr: str = "") -> subprocess.CompletedProcess[str]:
+            return subprocess.CompletedProcess([], 1, stdout, stderr)
+
+        login = json.dumps({"is_error": True, "result": "Not logged in · Please run /login"})
+        detail = review_gate.failure_detail
+        self.assertEqual(detail(proc(login)), "Not logged in · Please run /login")
+        self.assertEqual(detail(proc(login, "warn")), "warn; Not logged in · Please run /login")
+        self.assertEqual(detail(proc("", "boom")), "boom")
+        self.assertEqual(detail(proc("plain text")), "plain text")
+        self.assertEqual(detail(proc("")), "no output")
+
     def test_missing_cli_rejects(self):
         orig = review_gate.CLAUDE_CMD
         review_gate.CLAUDE_CMD = ["/nonexistent/claude-binary"]
