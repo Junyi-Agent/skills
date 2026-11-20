@@ -16,6 +16,8 @@
 #   I1  flush() has no fsync: intentional, explained in the commit message of "store: drop fsync"
 #   I2  cli.main swallows every exception and exits 0: listed in CLAUDE.md as known-intentional
 #   A1  load() returns {} on corrupt JSON, with no comment or commit explaining it (ambiguous)
+#   K1  kvs/cli.py is `kvs <verb> <key>` (get/set/list, no resource noun, no -o) and no ADR
+#       exempts it -> not kubectl-style, should be reported
 #   U1  kvs/export.py is uncommitted and has a shell injection; it is not part of the reviewed commit
 #   (incremental only)
 #   N1  Store.rename deletes the key when old == new

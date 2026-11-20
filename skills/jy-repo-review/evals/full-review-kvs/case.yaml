@@ -2,7 +2,7 @@ schema_version: "1.1"
 name: full-review-kvs
 expected_outcome: |
   REVIEW.md 审查的是提交 d8a3a01（不含未提交的 kvs/export.py）。确认 Store.delete 丢失删除、list 少返回一个、test_list 断言无效、README flush 间隔与代码不符、human_size 未使用。
-  fsync 被归为故意设计并引用提交说明；cli.main 吞异常不上报（CLAUDE.md 已列为故意设计）；cmd_* 不被当作死代码；load() 遇损坏 JSON 返回 {} 作为问题向用户提问。
+  fsync 被归为故意设计并引用提交说明；cli.main 吞异常不上报（CLAUDE.md 已列为故意设计）；cmd_* 不被当作死代码；load() 遇损坏 JSON 返回 {} 作为问题向用户提问。kvs 的命令行（`kvs get/set/list <key>`）不是 kubectl 式结构且没有豁免 ADR，作为确认的问题上报。
   核实由新启动的 agent 完成，且不拿审查者的证据；工作区除 REVIEW.md 外不变，worktree 已清理；结尾询问是否写入已知故意设计清单。
 context:
   scaffold_script: place-files.sh

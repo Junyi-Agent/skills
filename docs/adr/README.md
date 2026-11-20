@@ -20,3 +20,4 @@
 | [0001](0001-worktree-and-git-guard.md) | 在仓库外的 worktree 开发，用 PreToolUse hook 强制 | 采纳 |
 | [0002](0002-pre-push-review-gate.md) | push 前 3 个 Claude 审查，≥2 同意才放行 | 采纳 |
 | [0003](0003-merge-requires-green-ci.md) | 合并 PR 前要求 CI 检查全部通过 | 采纳 |
+| [0004](0004-kubectl-style-cli.md) | 命令行入口用 kubectl 式结构，豁免要人类批准并写 ADR | 采纳 |

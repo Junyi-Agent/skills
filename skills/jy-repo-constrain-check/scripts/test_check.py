@@ -267,6 +267,49 @@ class UnixTest(unittest.TestCase):
             self.assertIn(signal, facts(s))
         self.assertFalse(any("tests/" in e for e in s.evidence))
 
+    def test_lists_subcommand_names(self):
+        s = unix(
+            {
+                "t/cli.py": (
+                    "import argparse\np = argparse.ArgumentParser()\n"
+                    "sub = p.add_subparsers()\nsub.add_parser('get')\n"
+                    'sub.add_parser("delete")\np.add_argument("-o", "--output")\n'
+                ),
+                "t/more.py": "import click\n@cli.command(name='apply')\ndef apply(): ...\n",
+                "cmd/root.go": 'var c = &cobra.Command{Use: "describe"}\n',
+            }
+        )
+        line = next(f for f in s.facts if f.startswith("声明的子命令："))
+        self.assertEqual(
+            sorted(re.findall(r"`([\w-]+)`", line)), ["apply", "delete", "describe", "get"]
+        )
+        self.assertIn("子命令 3", facts(s))
+        self.assertIn("-o/--output 选输出格式 1", facts(s))
+
+    def test_finds_exemption_adrs(self):
+        s = unix(
+            {
+                "t/cli.py": CLI_PY,
+                "docs/adr/0001-exempt.md": (
+                    "# 0001 豁免 t 的 kubectl 式结构\n\n状态：采纳\n\n"
+                    "只有一个功能。批准人：用户（2026-11-20）\n"
+                ),
+                "docs/adr/0002-other.md": "# 0002 用 ruff\n\n状态：采纳\n",
+                "docs/adr/0003-db.md": "# 0003 豁免数据库迁移评审\n\n状态：提议\n",
+                "docs/adr/README.md": "CLI 豁免要写 ADR\n",
+            }
+        )
+        self.assertIn("提到 CLI 风格豁免的 ADR：`docs/adr/0001-exempt.md`（状态：采纳）", facts(s))
+        self.assertNotIn("0002", facts(s))
+        self.assertNotIn("0003", facts(s))
+        self.assertNotIn("README", facts(s))
+        self.assertTrue(any("0001-exempt.md:1" in e for e in s.evidence))
+
+    def test_no_subcommands_or_exemptions(self):
+        s = unix({"t/cli.py": CLI_PY})
+        self.assertIn("声明的子命令：没找到", facts(s))
+        self.assertIn("提到 CLI 风格豁免的 ADR：没有", facts(s))
+
     def test_mixed_and_unknown(self):
         s = unix({"package.json": '{"bin": {"t": "cli.js"}, "dependencies": {"express": "4"}}'})
         self.assertIn("类型初判：两类都有", facts(s))

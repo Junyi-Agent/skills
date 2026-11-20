@@ -159,8 +159,8 @@ DEFINE_VERIFIED = re.compile(
 )
 
 
-def check_adr(root: Path) -> Section:
-    s = Section(1, "ADR，状态区分提议 / 采纳 / 已验证")
+def find_adrs(root: Path) -> tuple[set[Path], list[Path]]:
+    """(ADR directories, every .md in them or named like an ADR, incl. README/template)."""
     adr_dirs, adr_files = set(), []
     for p in walk(root):
         if p.suffix.lower() != ".md":
@@ -170,11 +170,32 @@ def check_adr(root: Path) -> Section:
             adr_files.append(p)
             if in_adr_dir:
                 adr_dirs.add(p.parent)
+    return adr_dirs, adr_files
+
+
+def is_adr_doc(p: Path) -> bool:
+    return not re.match(r"(?i)(readme|index|template)", p.name)
+
+
+def adr_status(p: Path) -> str | None:
+    lines = read(p).splitlines()
+    for i, line in enumerate(lines[:60]):
+        m = STATUS_LINE.match(line)
+        if m:
+            return m.group(2).strip()
+        if STATUS_HEAD.match(line):
+            return next((ln.strip() for ln in lines[i + 1 : i + 5] if ln.strip()), "")
+    return None
+
+
+def check_adr(root: Path) -> Section:
+    s = Section(1, "ADR，状态区分提议 / 采纳 / 已验证")
+    adr_dirs, adr_files = find_adrs(root)
     if not adr_files:
         s.facts.append("没有找到 ADR（找过 adr/ decisions/ 等目录和 ADR-NNN*.md 文件）")
         return s
 
-    docs = [p for p in adr_files if not re.match(r"(?i)(readme|index|template)", p.name)]
+    docs = [p for p in adr_files if is_adr_doc(p)]
     meta = [p for p in adr_files if p not in docs]
     s.facts.append(
         f"ADR 目录：{', '.join(sorted(rel(root, d) for d in adr_dirs)) or '无（散落文件）'}；ADR {len(docs)} 篇，说明/模板 {len(meta)} 个"
@@ -183,17 +204,7 @@ def check_adr(root: Path) -> Section:
     statuses: dict[str, list[str]] = {}
     no_status = []
     for p in docs:
-        lines = read(p).splitlines()
-        found = None
-        for i, line in enumerate(lines[:60]):
-            m = STATUS_LINE.match(line)
-            if m:
-                found = m.group(2).strip()
-                break
-            if STATUS_HEAD.match(line):
-                nxt = next((ln.strip() for ln in lines[i + 1 : i + 5] if ln.strip()), "")
-                found = nxt
-                break
+        found = adr_status(p)
         if found:
             statuses.setdefault(found[:60], []).append(rel(root, p))
         else:
@@ -898,7 +909,21 @@ UNIX_SIGNALS = [
     ("交互提问", re.compile(
         r"\binput\(|inquirer|readline\.question|click\.(prompt|confirm)|Confirm\.ask|\bread -p\b"
     )),
+    ("子命令", re.compile(
+        r"add_subparsers|\.add_parser\(|click\.group|@\w+\.group\(|add_typer|\.AddCommand\(|"
+        r"\bSubcommand\b|\.command\(\s*(name\s*=\s*)?['\"]|cobra\.Command\b"
+    )),
+    ("-o/--output 选输出格式", re.compile(r"""['"]-o['"]|(?<![\w-])--output(?![\w-])""")),
 ]  # fmt: skip
+# Names of declared subcommands (argparse, click/typer, commander/yargs, cobra), to judge
+# whether they read as <verb> <resource>.
+SUBCOMMAND_NAME = re.compile(
+    r"""\.add_parser\(\s*['"]([\w-]+)|\.command\(\s*(?:name\s*=\s*)?['"]([\w-]+)|"""
+    r"""\bUse:\s*"([\w-]+)"""
+)
+# An ADR exempting a CLI from the kubectl-style rule: mentions an exemption and the CLI style.
+EXEMPT = re.compile(r"(?i)豁免|exempt")
+EXEMPT_TOPIC = re.compile(r"(?i)kubectl|子命令|subcommand|动词|\bverb|\bCLI\b|命令行")
 
 
 TEST_FILE = re.compile(r"(^test_|_test\.|\.(test|spec)\.|^conftest\.py$)")
@@ -973,11 +998,32 @@ def check_unix(root: Path) -> Section:
         s.evidence += [f"{label}：{h}" for h in hits[:2]]
     s.facts.append("代码里的 Unix 信号（命中文件数）：" + "，".join(counts))
     s.evidence = s.evidence[:20]
+
+    names = []
+    for f in code:
+        for m in SUBCOMMAND_NAME.finditer(read(f)):
+            names.append(next(g for g in m.groups() if g))
+    names = list(dict.fromkeys(names))
+    s.facts.append(
+        "声明的子命令：" + ("、".join(f"`{n}`" for n in names[:30]) if names else "没找到")
+    )
+
+    exempt = []
+    for p in find_adrs(root)[1]:
+        text = read(p)
+        if is_adr_doc(p) and EXEMPT.search(text) and EXEMPT_TOPIC.search(text):
+            exempt.append(f"`{rel(root, p)}`（状态：{adr_status(p) or '没写'}）")
+            s.evidence += grep(root, p, EXEMPT, limit=2)
+    s.facts.append("提到 CLI 风格豁免的 ADR：" + ("，".join(exempt) if exempt else "没有"))
+
     s.verdict = "JUDGE"
     s.judge += [
         "先定类型：主要给终端或其他程序用的是工具类；面向终端用户的应用或服务是 app 类，写“不适用”",
-        "工具类逐条核对 SKILL.md 第 8 项：单一职责、stdin/stdout/stderr 分工、机器可读输出、"
-        "非终端不带颜色、退出码、安静、不强制交互",
+        "工具类逐条核对 SKILL.md 第 8 项：kubectl 式命令结构、单一职责、stdin/stdout/stderr 分工、"
+        "机器可读输出、非终端不带颜色、退出码、安静、不强制交互",
+        "kubectl 式结构是必须项：每个命令行入口都是 `<tool> <动词> <资源> [名字] [flags]`，"
+        "动词跨资源复用，输出格式用 -o/--output 选；不满足的入口要有状态为采纳或已验证、"
+        "写明豁免对象、理由和批准人的 ADR，否则第 8 项不能给 ✅",
         "“交互提问”命中的地方，确认有参数或 stdin 能跳过提问",
     ]
     return s

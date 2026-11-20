@@ -2,7 +2,8 @@
 # Builds, in the current (empty) directory, a repo that should pass all eight checks except
 # one planted gap: the agent review gate is declared on the pre-push stage, but only the
 # pre-commit hook is installed. Expected script verdicts: 2 = WARN (missing pre-push hook),
-# 4 = JUDGE with an "未安装" warning, 8 = JUDGE with type "工具类" (shell scripts only),
+# 4 = JUDGE with an "未安装" warning, 8 = JUDGE with type "工具类" (shell scripts only) and
+# docs/adr/0004-cli-exempt.md listed as an exemption ADR (状态：采纳),
 # everything else JUDGE or PASS.
 #
 #   mkdir /tmp/good && cd /tmp/good && bash build_good_repo.sh && python3 ../scripts/check.py . --no-remote
@@ -13,6 +14,7 @@ echo '状态定义：提议 = 只写了 ADR 文档；采纳 = 允许去实现，
 printf '# ADR-001 用 ruff\n\n状态：已验证\n' > docs/adr/0001-ruff.md
 printf '# ADR-002 换存储\n\n状态：提议\n' > docs/adr/0002-store.md
 printf '# ADR-003 加缓存\n\n状态：采纳\n' > docs/adr/0003-cache.md
+printf '# ADR-004 豁免 scripts/new-worktree.sh 的 kubectl 式命令结构\n\n状态：采纳\n\n理由：只建一个 worktree，没有资源可分。批准人：维护者（人类），2026-11-20。\n' > docs/adr/0004-cli-exempt.md
 cat > .pre-commit-config.yaml <<'Y'
 repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit
