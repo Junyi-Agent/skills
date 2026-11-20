@@ -365,7 +365,7 @@ STRICT = re.compile(
 WEAK = re.compile(
     r"(?i)--exit-zero|(pre-commit|lint|ruff|eslint|flake8|mypy|pyright|pylint|clippy|golangci|"
     r"shellcheck|pytest|test)[^|\n]*\|\|\s*true|continue-on-error:\s*true|--max-warnings[= ]-1|"
-    r"--disable-error-code|ignore_errors\s*=\s*true|SKIP=|verbose:\s*true\s*$"
+    r"--disable-error-code|ignore_errors\s*=\s*true|SKIP="
 )
 LINT_CONFIGS = [
     "pyproject.toml",
@@ -719,7 +719,9 @@ def gha_triggers(text: str) -> tuple[dict[str, str], int]:
         if not line.strip() or line.lstrip().startswith("#"):
             continue
         ind = len(line) - len(line.lstrip())
-        if ind == 0 or (indent is not None and ind < indent):
+        # YAML allows the list under `on:` at the key's own indent: `on:\n- push`
+        zero_item = ind == 0 and line.startswith("-") and indent in (None, 0)
+        if (ind == 0 and not zero_item) or (indent is not None and ind < indent):
             break
         if indent is None:
             indent = ind

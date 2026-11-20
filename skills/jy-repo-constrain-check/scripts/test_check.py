@@ -75,6 +75,11 @@ class StrictLintTest(unittest.TestCase):
         s = fmt_lint({".pre-commit-config.yaml": PRECOMMIT.format(shellcheck_args=args)})
         self.assertEqual(s.verdict, "JUDGE")
 
+    def test_verbose_is_not_a_weakening(self):
+        args = "        args: [--enable=all]\n        verbose: true\n"
+        s = fmt_lint({".pre-commit-config.yaml": PRECOMMIT.format(shellcheck_args=args)})
+        self.assertEqual(s.verdict, "JUDGE")
+
     def test_explicit_ruff_select_is_evidence(self):
         for cfg in (
             'select = ["E", "F", "B", "UP", "SIM", "RUF"]\n',
@@ -148,6 +153,12 @@ class CiTest(unittest.TestCase):
             s = ci({".github/workflows/ci.yml": text})
             self.assertIn(f"PR 触发：{pr}；push 触发：{push}", facts(s), text)
             self.assertEqual(s.verdict, "WARN", text)
+
+    def test_zero_indent_event_list(self):
+        text = WORKFLOW.format(on="- push\n- pull_request\n")
+        self.assertIn("PR 触发：有；push 触发：有", facts(ci({".github/workflows/ci.yml": text})))
+        events, _ = check.gha_triggers("on:\n- push\njobs:\n  t:\n    runs-on: x\n")
+        self.assertEqual(list(events), ["push"])
 
     def test_tag_only_push_is_not_a_branch_push(self):
         files = {
