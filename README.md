@@ -7,6 +7,7 @@
 | [`jy-repo-review`](skills/jy-repo-review) | 只读代码审查，输出 `REVIEW.md` |
 | [`jy-repo-quiz`](skills/jy-repo-quiz) | 出题考你对 repo 的理解 |
 | [`jy-repo-constrain-check`](skills/jy-repo-constrain-check) | 检查 repo 的开发流程约束；工具类 repo 还查是否符合 Unix 设计哲学 |
+| [`jy-repo-codify`](skills/jy-repo-codify) | 收集仓库里犯过的错和纠正，固化成 lint、测试、check 脚本等可强制执行的约束 |
 
 ## 自举
 
