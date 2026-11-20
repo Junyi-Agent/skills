@@ -19,7 +19,7 @@ python3 <本 skill 目录>/scripts/check.py <repo 路径>
 - JUDGE：找到了相关内容，但是否合格要读懂语义，由你判断
 - N/A：不适用（目前只有第 8 项会出现，表示脚本初判为 app 类 repo）
 
-默认会用 `gh api` 查一次 GitHub 分支保护（6 秒超时）；离线或不想访问网络时加 `--no-remote`。
+默认会用 `gh api` 查一次 GitHub 分支保护（6 秒超时）；离线或不想访问网络时加 `--no-remote`。加 `--json` 时输出同样内容的 JSON（供其他程序处理）；路径不存在或不是目录时退出码为 2。
 
 ## 第 2 步：判定 JUDGE 项
 

@@ -3,10 +3,11 @@
 
 Read-only: never writes, never runs hooks or tests. Stdlib only.
 
-Usage: check.py [repo_path] [--no-remote]
-Exits 2 on an unknown argument.
+Usage: check.py [repo_path] [--no-remote] [--json]
+Exits 2 on an unknown argument or when repo_path is not a directory.
 
-Prints one markdown section per check with a preliminary verdict:
+Prints one markdown section per check (or, with --json, one JSON object with a
+"sections" list) with a preliminary verdict:
   PASS / WARN / FAIL   decided from the facts alone
   JUDGE                facts found, the model must read the snippets and decide
   N/A                  check does not apply (item 8 on an app repo)
@@ -122,6 +123,16 @@ class Section:
         if self.judge:
             out += ["", "需要判断："] + [f"  - {j}" for j in self.judge]
         return "\n".join(out) + "\n"
+
+    def to_dict(self) -> dict:
+        return {
+            "num": self.num,
+            "title": self.title,
+            "verdict": self.verdict,
+            "facts": self.facts,
+            "evidence": list(dict.fromkeys(self.evidence)),
+            "judge": self.judge,
+        }
 
 
 # ---------- 1. ADR ----------
@@ -973,19 +984,26 @@ def check_unix(root: Path) -> Section:
 # ---------- main ----------
 
 
+USAGE = "Usage: check.py [repo_path] [--no-remote] [--json]"
+FLAGS = {"--no-remote", "--json"}
+
+
 def main() -> None:
     argv = sys.argv[1:]
     if "-h" in argv or "--help" in argv:
         print(__doc__)
         return
-    unknown = [a for a in argv if a.startswith("-") and a != "--no-remote"]
+    unknown = [a for a in argv if a.startswith("-") and a not in FLAGS]
     args = [a for a in argv if not a.startswith("-")]
     if unknown or len(args) > 1:
         bad = " ".join(unknown or args[1:])
         print(f"check.py: unexpected argument: {bad}", file=sys.stderr)
-        print("Usage: check.py [repo_path] [--no-remote]", file=sys.stderr)
+        print(USAGE, file=sys.stderr)
         sys.exit(2)
     root = Path(args[0] if args else ".").resolve()
+    if not root.is_dir():
+        print(f"check.py: not a directory: {root}", file=sys.stderr)
+        sys.exit(2)
     remote = "--no-remote" not in argv
     top = git(root, "rev-parse", "--show-toplevel")
     if top:
@@ -1001,6 +1019,10 @@ def main() -> None:
         check_ci(root, remote),
         check_unix(root),
     ]
+    if "--json" in argv:
+        out = {"root": str(root), "sections": [s.to_dict() for s in sections]}
+        print(json.dumps(out, ensure_ascii=False, indent=2))
+        return
     print(f"# 流程约束检查：{root}\n")
     print("| # | 检查项 | 初判 |\n|---|---|---|")
     for s in sections:
