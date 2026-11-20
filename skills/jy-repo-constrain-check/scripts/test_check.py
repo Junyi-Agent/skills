@@ -87,6 +87,33 @@ class StrictLintTest(unittest.TestCase):
             self.assertTrue(any("ruff.toml" in e for e in s.evidence), cfg)
 
 
+class AgentGateTest(unittest.TestCase):
+    def test_agent_call_forms(self):
+        found = (
+            'subprocess.run(["claude", "-p", prompt])',
+            'claude -p "$PROMPT" < diff.txt',
+            'cmd = ["codex", "exec", prompt]',
+            'claude = shutil.which("claude")',
+            "exe = which('codex')",
+        )
+        for line in found:
+            self.assertTrue(check.AGENT_CALL.search(line), line)
+        for line in ('print("claude")', "which(python)", 'run(["codex", "--version"])'):
+            self.assertFalse(check.AGENT_CALL.search(line), line)
+
+    def test_which_then_argv_list_is_detected(self):
+        gate = (
+            "import shutil, subprocess, sys\n"
+            'claude = shutil.which("claude")\n'
+            'cmd = [\n    claude,\n    "-p",\n    PROMPT,\n]\n'
+            "sys.exit(0 if approvals >= 2 else 1)\n"
+        )
+        with Fixture({"tools/review_gate.py": gate}) as root:
+            s = check.check_agent_gate(root, [])
+        self.assertEqual(s.verdict, "JUDGE")
+        self.assertTrue(any("review_gate.py" in f for f in s.facts))
+
+
 WORKFLOW = "name: ci\non:\n{on}jobs:\n  t:\n    steps:\n      - run: pre-commit run --all-files\n      - run: pytest\n"
 
 

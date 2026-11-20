@@ -439,6 +439,8 @@ def check_fmt_lint(root: Path, hooks: list[Path]) -> Section:
 AGENT_CALL = re.compile(
     r"(?i)\bclaude\s+(-p|--print)\b|\bclaude\b.*--output-format|\bcodex\s+exec\b|"
     r"[\"']claude[\"']\s*,|"  # argv list: ["claude", "-p", ...]
+    r"[\"']codex[\"']\s*,\s*[\"']exec[\"']|"  # argv list: ["codex", "exec", ...]
+    r"\bwhich\(\s*[\"'](claude|codex)[\"']\s*\)|"  # exe = shutil.which("claude"); [exe, "-p", ...]
     r"\bgemini\s+-p\b|anthropic|subagent|claude_agent_sdk|\bAgent\("
 )
 QUORUM = re.compile(r"(?i)-ge\s+2|>=\s*2|2\s*/\s*3|2 of 3|quorum|majority|approv|多数|同意|通过票")
