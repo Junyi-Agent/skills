@@ -1,0 +1,83 @@
+{
+  "_kinds": "preference = 你的偏好或决定，模型变强也不会自己知道；practice = 通用做法，模型升级后可能默认就会做",
+  "collect-candidates": {
+    "01-lists-urlopen-with-sources": {
+      "rule": "第 1 步 没指定：从 CLAUDE.md、fix 提交收集候选",
+      "kind": "preference"
+    },
+    "02-lists-naive-datetime-from-review-history": {
+      "rule": "第 1 步 没指定：从 REVIEW.md 历史收集候选",
+      "kind": "preference"
+    },
+    "03-urlopen-ranked-first": {
+      "rule": "第 1 步 按出现次数和后果排序",
+      "kind": "practice"
+    },
+    "04-reports-check-coverage": {
+      "rule": "第 1 步 每条写明有没有机械检查",
+      "kind": "preference"
+    },
+    "05-excludes-print-already-enforced": {
+      "rule": "第 1 步 已有检查覆盖的不列",
+      "kind": "preference"
+    },
+    "06-excludes-known-intentional": {
+      "rule": "第 1 步 已知的故意设计不列",
+      "kind": "preference"
+    },
+    "07-asks-user-to-pick": {
+      "rule": "第 1 步 由用户选，选完再往下做",
+      "kind": "preference"
+    },
+    "08-no-changes-before-pick": {
+      "rule": "第 1 步 由用户选，选完再往下做",
+      "kind": "preference"
+    }
+  },
+  "codify-correction": {
+    "01-invariant-generalized": {
+      "rule": "第 1 步 推广到一类错误",
+      "kind": "practice"
+    },
+    "02-mechanism-lint-or-higher": {
+      "rule": "第 3 步 强度阶梯，文档只作退路",
+      "kind": "preference"
+    },
+    "03-message-points-to-fetch": {
+      "rule": "第 3 步 报错信息说清楚该怎么做",
+      "kind": "preference"
+    },
+    "04-wrapper-exempted-with-reason": {
+      "rule": "第 4 步 合理例外行内 ignore 并写明原因",
+      "kind": "practice"
+    },
+    "05-existing-violation-fixed": {
+      "rule": "第 4 步 现有违规属于真问题的顺手修掉",
+      "kind": "practice"
+    },
+    "06-proved-rule-fires": {
+      "rule": "第 4 步 证明规则会触发",
+      "kind": "preference"
+    },
+    "07-check-green-at-end": {
+      "rule": "第 5 步 最后完整跑一次 check",
+      "kind": "practice"
+    },
+    "08-wired-into-entry": {
+      "rule": "第 5 步 接入统一入口",
+      "kind": "preference"
+    },
+    "09-no-existing-check-weakened": {
+      "rule": "第 4 步 不得关闭或放宽已有检查",
+      "kind": "practice"
+    },
+    "10-no-commit": {
+      "rule": "第 6 步 不自动 commit",
+      "kind": "preference"
+    },
+    "11-report-has-sections": {
+      "rule": "第 6 步 报告格式",
+      "kind": "preference"
+    }
+  }
+}

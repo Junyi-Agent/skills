@@ -1,0 +1,6 @@
+schema_version: "1.1"
+name: codify-correction
+expected_outcome: |
+  用户给了具体纠正，走“刚纠正过”入口。不变式推广到“feeds/http.py 之外不得直接调用 urllib.request.urlopen”，不只针对 news.py。机制用 lint（ruff TID251 banned-api 或等价的 import 限制）或更高级，报错信息指向 feeds.http.fetch()；feeds/http.py 作为合理例外放开并写明原因；news.py 改成走 fetch。证明规则会触发（临时违规时检查失败，之后删掉），最后 make check 或 ruff + 单元测试全绿。规则接入现有入口（pyproject 的 ruff 配置，pre-commit 和 make check 都会跑）。不放宽已有检查，不自动提交，报告写明不变式、机制、位置、验证。
+context:
+  scaffold_script: place-files.sh

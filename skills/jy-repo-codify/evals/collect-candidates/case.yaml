@@ -1,0 +1,6 @@
+schema_version: "1.1"
+name: collect-candidates
+expected_outcome: |
+  没有指定具体纠正，走“收集候选”入口。列出的候选带出处、次数、是否已有机械检查：C1（直接调 urllib.request.urlopen，CLAUDE.md 写了、修过两次、news.py 仍在犯）排第一；C2（不带时区的 datetime.now，两版 REVIEW.md 各报一次）也列出。E1（print 调试，ruff T20 已覆盖）和 K1（cli.py 的 print，已知的故意设计）不作为待固化的候选。最后让用户选要固化哪几条，在用户选之前不改仓库。
+context:
+  scaffold_script: place-files.sh
