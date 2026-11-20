@@ -1,0 +1,82 @@
+[
+  {
+    "query": "把刚才这个纠正固化下来，下次别再犯同样的错",
+    "should_trigger": true
+  },
+  {
+    "query": "CLAUDE.md 里的规矩写了一堆，agent 照样违反。挑几条能机械检查的，改成 lint 或测试",
+    "should_trigger": true
+  },
+  {
+    "query": "你已经第三次忘了给 subprocess.run 加 check=False 了，想个办法让它以后自动报错",
+    "should_trigger": true
+  },
+  {
+    "query": "CLAUDE.md 里写了不许直接 import torch.distributed，agent 还是老犯，能不能变成 lint 规则？",
+    "should_trigger": true
+  },
+  {
+    "query": "翻一下这个仓库的 REVIEW.md 和 fix 提交，看看哪些反复出现的问题可以变成检查",
+    "should_trigger": true
+  },
+  {
+    "query": "codify this: never call jax.jit directly in product code, always go through kernels.compile()",
+    "should_trigger": true
+  },
+  {
+    "query": "这个仓库踩过的坑总是靠文档提醒，帮我把能自动化的都变成测试或者 lint",
+    "should_trigger": true
+  },
+  {
+    "query": "每次 review 都报 naive datetime，怎么从根上杜绝？",
+    "should_trigger": true
+  },
+  {
+    "query": "Turn the lessons from our last few bug fixes into checks that fail CI if they happen again",
+    "should_trigger": true
+  },
+  {
+    "query": "别再犯这个错了：日志里不许打印 token，加个约束",
+    "should_trigger": true
+  },
+  {
+    "query": "帮我 review 一下这个 repo，报告写到 REVIEW.md",
+    "should_trigger": false
+  },
+  {
+    "query": "看看这个仓库有没有 pre-commit、CI 和 worktree 这些流程约束",
+    "should_trigger": false
+  },
+  {
+    "query": "记一下：我更喜欢用 uv 而不是 pip",
+    "should_trigger": false
+  },
+  {
+    "query": "把“提交前要跑 make check”写进 CLAUDE.md",
+    "should_trigger": false
+  },
+  {
+    "query": "给 ruff 配置加上 B 规则，然后把报出来的问题修掉",
+    "should_trigger": false
+  },
+  {
+    "query": "这个函数有 bug，list 少返回一个元素，帮我修一下并加个测试",
+    "should_trigger": false
+  },
+  {
+    "query": "帮我写一个 pre-commit hook 跑 shellcheck",
+    "should_trigger": false
+  },
+  {
+    "query": "考考我对这个仓库架构的理解",
+    "should_trigger": false
+  },
+  {
+    "query": "为什么 CI 上 mypy 报错了？帮我看看",
+    "should_trigger": false
+  },
+  {
+    "query": "把这个 skill 的 description 优化一下，让它更容易被触发",
+    "should_trigger": false
+  }
+]
