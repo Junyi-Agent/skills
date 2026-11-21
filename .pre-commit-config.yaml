@@ -40,6 +40,37 @@ repos:
         language: system
         files: ^scripts/(test_)?review_gate\.py$
         pass_filenames: false
+      - id: adr-guard-tests
+        name: ADR guard hook tests
+        entry: python3 .claude/hooks/test_adr_guard.py
+        language: system
+        files: ^(\.claude/hooks/(test_)?adr_guard\.py|\.claude/settings\.json|scripts/repo_check\.py|docs/adr/template\.md)$
+        pass_filenames: false
+      - id: repo-check-tests
+        name: repo check script tests
+        entry: python3 scripts/test_repo_check.py
+        language: system
+        files: ^scripts/(test_)?repo_check\.py$
+        pass_filenames: false
+      - id: skill-registration
+        name: every skill has a .claude/skills symlink and a README row
+        entry: python3 scripts/repo_check.py check skills
+        language: system
+        always_run: true
+        pass_filenames: false
+      - id: adr-index
+        name: ADR list matches the files; 已验证 only with a human-filled 验证 section
+        entry: python3 scripts/repo_check.py check adrs
+        language: system
+        always_run: true
+        pass_filenames: false
+      - id: no-filler-words
+        name: >-
+          空泛修饰词（核心能力/关键/彰显/赋能/驱动）或「不是…而是…」句式：改成具体说法，
+          如「关键路径」写「主路径」（见 ~/claude/CLAUDE.md Writing Constraints）
+        entry: 核心能力|赋能|彰显|驱动|关键|不是[^。！？]{0,40}而是
+        language: pygrep
+        types: [markdown]
       - id: release-tests
         name: release script tests
         entry: python3 scripts/test_release.py
