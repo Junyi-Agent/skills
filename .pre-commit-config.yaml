@@ -40,6 +40,19 @@ repos:
         language: system
         files: ^scripts/(test_)?review_gate\.py$
         pass_filenames: false
+      - id: release-tests
+        name: release script tests
+        entry: python3 scripts/test_release.py
+        language: system
+        files: ^scripts/(test_)?release\.py$
+        pass_filenames: false
+      - id: release-version
+        name: VERSION and CHANGELOG follow ADR 0005
+        entry: python3 scripts/release.py check version --base origin/main
+        language: system
+        stages: [pre-push]
+        always_run: true
+        pass_filenames: false
       - id: review-gate
         name: review gate (3 Claude reviewers, >=2 approve)
         entry: python3 scripts/review_gate.py
