@@ -21,3 +21,4 @@
 | [0002](0002-pre-push-review-gate.md) | push 前 3 个 Claude 审查，≥2 同意才放行 | 采纳 |
 | [0003](0003-merge-requires-green-ci.md) | 合并 PR 前要求 CI 检查全部通过 | 采纳 |
 | [0004](0004-kubectl-style-cli.md) | 命令行入口用 kubectl 式结构，豁免要人类批准并写 ADR | 采纳 |
+| [0005](0005-versioning-and-tags.md) | 版本号写在 VERSION，改 skills/ 就升版本，CI 自动打 tag | 采纳 |

@@ -29,6 +29,7 @@ pre-commit install
 
 - evals 产物（`*-workspace/`、`evals/results/`）不提交。
 - 改 SKILL.md 的 description 会影响触发，改完跑一下对应 skill 的 evals。
+- 改了 `skills/` 下的文件就升 `VERSION` 并在 `CHANGELOG.md` 顶部加一节，X/Y/Z 怎么选见 [[docs/adr/0005-versioning-and-tags]]。push 和 CI 会检查；合并后 CI 自动打 tag，不手动打。
 - 流程或架构决策写 ADR（`docs/adr/`）。状态分三种：提议 = 只写了文档；采纳 = 允许实现，可能已实现；已验证 = 人类测试了代码并确认。agent 最多改到「采纳」，「已验证」只由人类改。
 
 ## 已知的故意设计

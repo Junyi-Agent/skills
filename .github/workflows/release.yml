@@ -1,0 +1,27 @@
+name: release
+
+on:
+  push:
+    branches: [main]
+    paths: [VERSION]
+
+permissions:
+  contents: write
+
+jobs:
+  tag:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Create the tag and GitHub Release for VERSION
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="$(tr -d '[:space:]' < VERSION)"
+          python3 scripts/release.py check version
+          if gh release view "v$version" > /dev/null 2>&1 || git ls-remote --exit-code --tags origin "v$version" > /dev/null; then
+            echo "v$version already exists"
+            exit 0
+          fi
+          awk -v v="$version" '$0 ~ "^## " v "( |$)" {on=1; next} /^## /{on=0} on' CHANGELOG.md > notes.md
+          gh release create "v$version" --target "$GITHUB_SHA" --title "v$version" --notes-file notes.md
