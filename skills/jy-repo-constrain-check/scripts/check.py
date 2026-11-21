@@ -3,10 +3,10 @@
 
 Read-only: never writes, never runs hooks or tests. Stdlib only.
 
-Usage: check.py [repo_path] [--no-remote] [--json]
-Exits 2 on an unknown argument or when repo_path is not a directory.
+Usage: check.py get checks [NUM ...] [--repo PATH] [-o text|json] [--no-remote]
+Exits 2 on a bad argument or when --repo is not a directory.
 
-Prints one markdown section per check (or, with --json, one JSON object with a
+Prints one markdown section per check (or, with -o json, one JSON object with a
 "sections" list) with a preliminary verdict:
   PASS / WARN / FAIL   decided from the facts alone
   JUDGE                facts found, the model must read the snippets and decide
@@ -15,6 +15,7 @@ Prints one markdown section per check (or, with --json, one JSON object with a
 
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import re
@@ -159,8 +160,8 @@ DEFINE_VERIFIED = re.compile(
 )
 
 
-def check_adr(root: Path) -> Section:
-    s = Section(1, "ADR，状态区分提议 / 采纳 / 已验证")
+def find_adrs(root: Path) -> tuple[set[Path], list[Path]]:
+    """(ADR directories, every .md in them or named like an ADR, incl. README/template)."""
     adr_dirs, adr_files = set(), []
     for p in walk(root):
         if p.suffix.lower() != ".md":
@@ -170,11 +171,32 @@ def check_adr(root: Path) -> Section:
             adr_files.append(p)
             if in_adr_dir:
                 adr_dirs.add(p.parent)
+    return adr_dirs, adr_files
+
+
+def is_adr_doc(p: Path) -> bool:
+    return not re.match(r"(?i)(readme|index|template)", p.name)
+
+
+def adr_status(p: Path) -> str | None:
+    lines = read(p).splitlines()
+    for i, line in enumerate(lines[:60]):
+        m = STATUS_LINE.match(line)
+        if m:
+            return m.group(2).strip()
+        if STATUS_HEAD.match(line):
+            return next((ln.strip() for ln in lines[i + 1 : i + 5] if ln.strip()), "")
+    return None
+
+
+def check_adr(root: Path) -> Section:
+    s = Section(1, "ADR，状态区分提议 / 采纳 / 已验证")
+    adr_dirs, adr_files = find_adrs(root)
     if not adr_files:
         s.facts.append("没有找到 ADR（找过 adr/ decisions/ 等目录和 ADR-NNN*.md 文件）")
         return s
 
-    docs = [p for p in adr_files if not re.match(r"(?i)(readme|index|template)", p.name)]
+    docs = [p for p in adr_files if is_adr_doc(p)]
     meta = [p for p in adr_files if p not in docs]
     s.facts.append(
         f"ADR 目录：{', '.join(sorted(rel(root, d) for d in adr_dirs)) or '无（散落文件）'}；ADR {len(docs)} 篇，说明/模板 {len(meta)} 个"
@@ -183,17 +205,7 @@ def check_adr(root: Path) -> Section:
     statuses: dict[str, list[str]] = {}
     no_status = []
     for p in docs:
-        lines = read(p).splitlines()
-        found = None
-        for i, line in enumerate(lines[:60]):
-            m = STATUS_LINE.match(line)
-            if m:
-                found = m.group(2).strip()
-                break
-            if STATUS_HEAD.match(line):
-                nxt = next((ln.strip() for ln in lines[i + 1 : i + 5] if ln.strip()), "")
-                found = nxt
-                break
+        found = adr_status(p)
         if found:
             statuses.setdefault(found[:60], []).append(rel(root, p))
         else:
@@ -898,7 +910,21 @@ UNIX_SIGNALS = [
     ("交互提问", re.compile(
         r"\binput\(|inquirer|readline\.question|click\.(prompt|confirm)|Confirm\.ask|\bread -p\b"
     )),
+    ("子命令", re.compile(
+        r"add_subparsers|\.add_parser\(|click\.group|@\w+\.group\(|add_typer|\.AddCommand\(|"
+        r"\bSubcommand\b|\.command\(\s*(name\s*=\s*)?['\"]|cobra\.Command\b"
+    )),
+    ("-o/--output 选输出格式", re.compile(r"""['"]-o['"]|(?<![\w-])--output(?![\w-])""")),
 ]  # fmt: skip
+# Names of declared subcommands (argparse, click/typer, commander/yargs, cobra), to judge
+# whether they read as <verb> <resource>.
+SUBCOMMAND_NAME = re.compile(
+    r"""\.add_parser\(\s*['"]([\w-]+)|\.command\(\s*(?:name\s*=\s*)?['"]([\w-]+)|"""
+    r"""\bUse:\s*"([\w-]+)"""
+)
+# An ADR exempting a CLI from the kubectl-style rule: mentions an exemption and the CLI style.
+EXEMPT = re.compile(r"(?i)豁免|exempt")
+EXEMPT_TOPIC = re.compile(r"(?i)kubectl|子命令|subcommand|动词|\bverb|\bCLI\b|命令行")
 
 
 TEST_FILE = re.compile(r"(^test_|_test\.|\.(test|spec)\.|^conftest\.py$)")
@@ -973,11 +999,32 @@ def check_unix(root: Path) -> Section:
         s.evidence += [f"{label}：{h}" for h in hits[:2]]
     s.facts.append("代码里的 Unix 信号（命中文件数）：" + "，".join(counts))
     s.evidence = s.evidence[:20]
+
+    names = []
+    for f in code:
+        for m in SUBCOMMAND_NAME.finditer(read(f)):
+            names.append(next(g for g in m.groups() if g))
+    names = list(dict.fromkeys(names))
+    s.facts.append(
+        "声明的子命令：" + ("、".join(f"`{n}`" for n in names[:30]) if names else "没找到")
+    )
+
+    exempt = []
+    for p in find_adrs(root)[1]:
+        text = read(p)
+        if is_adr_doc(p) and EXEMPT.search(text) and EXEMPT_TOPIC.search(text):
+            exempt.append(f"`{rel(root, p)}`（状态：{adr_status(p) or '没写'}）")
+            s.evidence += grep(root, p, EXEMPT, limit=2)
+    s.facts.append("提到 CLI 风格豁免的 ADR：" + ("，".join(exempt) if exempt else "没有"))
+
     s.verdict = "JUDGE"
     s.judge += [
         "先定类型：主要给终端或其他程序用的是工具类；面向终端用户的应用或服务是 app 类，写“不适用”",
-        "工具类逐条核对 SKILL.md 第 8 项：单一职责、stdin/stdout/stderr 分工、机器可读输出、"
-        "非终端不带颜色、退出码、安静、不强制交互",
+        "工具类逐条核对 SKILL.md 第 8 项：kubectl 式命令结构、单一职责、stdin/stdout/stderr 分工、"
+        "机器可读输出、非终端不带颜色、退出码、安静、不强制交互",
+        "kubectl 式结构是必须项：每个命令行入口都是 `<tool> <动词> <资源> [名字] [flags]`，"
+        "动词跨资源复用，输出格式用 -o/--output 选；不满足的入口要有状态为采纳或已验证、"
+        "写明豁免对象、理由和批准人的 ADR，否则第 8 项不能给 ✅",
         "“交互提问”命中的地方，确认有参数或 stdin 能跳过提问",
     ]
     return s
@@ -986,42 +1033,60 @@ def check_unix(root: Path) -> Section:
 # ---------- main ----------
 
 
-USAGE = "Usage: check.py [repo_path] [--no-remote] [--json]"
-FLAGS = {"--no-remote", "--json"}
+CHECKS = range(1, 9)
+
+
+def parse_args(argv: list[str]) -> argparse.Namespace:
+    p = argparse.ArgumentParser(
+        prog="check.py",
+        allow_abbrev=False,
+        description="Collect facts about a repo's workflow constraints (read-only).",
+    )
+    verbs = p.add_subparsers(dest="verb", required=True, metavar="VERB")
+    get = verbs.add_parser("get", allow_abbrev=False, help="run checks and print the results")
+    resources = get.add_subparsers(dest="resource", required=True, metavar="RESOURCE")
+    checks = resources.add_parser(
+        "checks",
+        allow_abbrev=False,
+        help="the eight workflow checks",
+        description="Run the eight workflow checks.",
+    )
+    checks.add_argument(
+        "names", nargs="*", type=int, metavar="NUM", help="check numbers 1-8 (default: all)"
+    )
+    checks.add_argument("--repo", default=".", help="repo to check (default: .)")
+    checks.add_argument("-o", "--output", choices=["text", "json"], default="text")
+    checks.add_argument(
+        "--no-remote", action="store_true", help="skip the GitHub branch protection query"
+    )
+    args = p.parse_args(argv)
+    bad = [n for n in args.names if n not in CHECKS]
+    if bad:
+        checks.error(f"no such check: {', '.join(map(str, bad))} (choose from 1-8)")
+    if not Path(args.repo).is_dir():
+        checks.error(f"not a directory: {Path(args.repo).resolve()}")
+    return args
 
 
 def main() -> None:
-    argv = sys.argv[1:]
-    if "-h" in argv or "--help" in argv:
-        print(__doc__)
-        return
-    unknown = [a for a in argv if a.startswith("-") and a not in FLAGS]
-    args = [a for a in argv if not a.startswith("-")]
-    if unknown or len(args) > 1:
-        bad = " ".join(unknown or args[1:])
-        print(f"check.py: unexpected argument: {bad}", file=sys.stderr)
-        print(USAGE, file=sys.stderr)
-        sys.exit(2)
-    root = Path(args[0] if args else ".").resolve()
-    if not root.is_dir():
-        print(f"check.py: not a directory: {root}", file=sys.stderr)
-        sys.exit(2)
-    remote = "--no-remote" not in argv
+    args = parse_args(sys.argv[1:])
+    root = Path(args.repo).resolve()
     top = git(root, "rev-parse", "--show-toplevel")
     if top:
         root = Path(top)
     hooks = installed_hooks(hooks_dir(root)) if top else []
-    sections = [
-        check_adr(root),
-        check_git_precommit(root, hooks),
-        check_fmt_lint(root, hooks),
-        check_agent_gate(root, hooks),
-        check_worktree_doc(root),
-        check_enforcement(root, hooks),
-        check_ci(root, remote),
-        check_unix(root),
-    ]
-    if "--json" in argv:
+    run = {
+        1: lambda: check_adr(root),
+        2: lambda: check_git_precommit(root, hooks),
+        3: lambda: check_fmt_lint(root, hooks),
+        4: lambda: check_agent_gate(root, hooks),
+        5: lambda: check_worktree_doc(root),
+        6: lambda: check_enforcement(root, hooks),
+        7: lambda: check_ci(root, not args.no_remote),
+        8: lambda: check_unix(root),
+    }
+    sections = [run[n]() for n in sorted(set(args.names or CHECKS))]
+    if args.output == "json":
         out = {"root": str(root), "sections": [s.to_dict() for s in sections]}
         print(json.dumps(out, ensure_ascii=False, indent=2))
         return

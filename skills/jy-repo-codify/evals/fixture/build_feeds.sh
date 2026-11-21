@@ -2,6 +2,8 @@
 # Builds the feeds fixture repo used by the jy-repo-codify evals, in the current directory.
 # Commit dates and authors are fixed, so the hashes are reproducible.
 #
+#   build_feeds.sh create repo   (exits 2 on any other arguments)
+#
 # Planted lessons (the graders refer to these ids; see ../rule-map.json):
 #   C1  Direct urllib.request.urlopen (no timeout) instead of feeds.http.fetch(): written in
 #       CLAUDE.md, fixed twice (weather, rates), and still present in feeds/sources/news.py.
@@ -15,6 +17,10 @@
 #   J1  "Write docs/sources.md before adding a source": a judgment rule that cannot be
 #       checked mechanically. At most a doc-level candidate.
 set -euo pipefail
+if [ $# -ne 2 ] || [ "$1" != create ] || [ "$2" != repo ]; then
+  echo "usage: build_feeds.sh create repo" >&2
+  exit 2
+fi
 
 export GIT_AUTHOR_NAME="feeds dev" GIT_AUTHOR_EMAIL="dev@example.invalid"
 export GIT_COMMITTER_NAME="feeds dev" GIT_COMMITTER_EMAIL="dev@example.invalid"

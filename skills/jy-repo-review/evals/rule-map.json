@@ -18,7 +18,8 @@
     "15-reproduced-correctness-finding":          {"rule": "第 3 步 第 5 条 正确性发现写复现脚本", "kind": "practice"},
     "16-ran-tests-and-tools":                     {"rule": "第 1 步 跑确定性工具和 README 步骤", "kind": "practice"},
     "17-working-tree-untouched":                  {"rule": "开头 全程只读，临时产物放 repo 外", "kind": "practice"},
-    "18-asks-before-updating-intentional-list":   {"rule": "第 4 步 结尾询问，同意后才写清单", "kind": "preference"}
+    "18-asks-before-updating-intentional-list":   {"rule": "第 4 步 结尾询问，同意后才写清单", "kind": "preference"},
+    "19-flags-cli-not-kubectl-style":             {"rule": "第 2 步 设计与工程组：命令结构（kubectl 式，豁免要 ADR）", "kind": "preference"}
   },
   "incremental-review-kvs": {
     "01-declares-incremental-scope":    {"rule": "第 0 步 第 5 条 增量审查及范围注明", "kind": "preference"},
