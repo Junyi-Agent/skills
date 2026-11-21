@@ -37,4 +37,4 @@ pre-commit install
 审查（`/jy-repo-review`）不把下列行为当问题上报。
 
 - `git_guard.py` 对已删除文件的 `git checkout <file>` 按切分支拒绝：只有参数是已存在的路径、且不是 commit 时才当作恢复文件放行，拒绝信息给出 `git checkout -- <path>` 的写法（[[docs/adr/0001-worktree-and-git-guard]]）。
-- `git_guard.py` 拦不住 `export SKIP=...` 后单独 push、`eval`、脚本文件里的 git 命令；`git push --all` 带上 main 由服务端分支保护拦（ADR 0001、0003）。
+- `git_guard.py` 拦不住 `export SKIP=...` 后单独 push、`eval`、脚本文件里的 git 命令，以及别的命令的输出喂给 shell（`cat x.sh | bash`）；`git push --all` 带上 main 由服务端分支保护拦（ADR 0001、0003）。

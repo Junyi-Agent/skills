@@ -59,7 +59,9 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     v.add_argument("cases", nargs="*", metavar="CASE", help="eval case names (default: all)")
     v.add_argument("--iteration", required=True, help="<workspace>/iteration-N directory")
     v.add_argument("-o", "--output", choices=["text", "json"], default="text")
+
     args = p.parse_args(argv)
+
     if not Path(args.iteration).is_dir():
         v.error(f"not a directory: {args.iteration}")
     unknown = [c for c in args.cases if not (EVALS / c / "graders").is_dir()]
@@ -84,6 +86,7 @@ def case_result(case_dir: Path, rule_map: dict) -> dict:
     case = case_dir.name
     texts = grader_texts(case)
     tally = {g: {c: [0, 0] for c in CONFIGS} for g in texts.values()}
+
     nruns = {}
     for c in CONFIGS:
         gs = runs(case_dir / c)
@@ -99,6 +102,7 @@ def case_result(case_dir: Path, rule_map: dict) -> dict:
                     continue
                 tally[stem][c][0] += bool(e["passed"])
                 tally[stem][c][1] += 1
+
     rows = []
     for stem in sorted(tally):
         rate = {c: (p / n if n else None) for c, (p, n) in tally[stem].items()}
@@ -112,6 +116,7 @@ def case_result(case_dir: Path, rule_map: dict) -> dict:
                 "verdict": verdict_of(*(rate[c] for c in CONFIGS)),
             }
         )
+
     return {"case": case, "runs": nruns, "rows": rows}
 
 
@@ -136,12 +141,15 @@ def main() -> None:
     args = parse_args(sys.argv[1:])
     it = Path(args.iteration)
     rule_map = json.loads((EVALS / "rule-map.json").read_text())
+
     case_dirs = sorted(p for p in it.iterdir() if p.is_dir() and (EVALS / p.name).is_dir())
     if args.cases:
         case_dirs = [p for p in case_dirs if p.name in args.cases]
         for c in sorted(set(args.cases) - {p.name for p in case_dirs}):
             print(f"warning: no runs for case {c} in {it}", file=sys.stderr)
+
     results = [case_result(d, rule_map) for d in case_dirs]
+
     if args.output == "json":
         print(json.dumps({"cases": results}, ensure_ascii=False, indent=2))
         return
