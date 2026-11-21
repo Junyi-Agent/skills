@@ -26,7 +26,7 @@ repos:
         name: git guard hook tests
         entry: python3 .claude/hooks/test_git_guard.py
         language: system
-        files: ^\.claude/hooks/
+        files: ^(\.claude/hooks/|\.claude/maintain\.json$|skills/jy-repo-maintain/scripts/maintain\.py$)
         pass_filenames: false
       - id: check-script-tests
         name: constrain-check script tests
@@ -71,6 +71,18 @@ repos:
         entry: 核心能力|赋能|彰显|驱动|关键|不是[^。！？]{0,40}而是
         language: pygrep
         types: [markdown]
+      - id: maintain-tests
+        name: jy-repo-maintain script tests
+        entry: python3 skills/jy-repo-maintain/scripts/test_maintain.py
+        language: system
+        files: ^skills/jy-repo-maintain/scripts/
+        pass_filenames: false
+      - id: history-tests
+        name: jy-skills-update script tests
+        entry: python3 skills/jy-skills-update/scripts/test_history.py
+        language: system
+        files: ^skills/jy-skills-update/scripts/
+        pass_filenames: false
       - id: release-tests
         name: release script tests
         entry: python3 scripts/test_release.py

@@ -22,3 +22,4 @@
 | [0003](0003-merge-requires-green-ci.md) | 合并 PR 前要求 CI 检查全部通过 | 采纳 |
 | [0004](0004-kubectl-style-cli.md) | 命令行入口用 kubectl 式结构，豁免要人类批准并写 ADR | 采纳 |
 | [0005](0005-versioning-and-tags.md) | 版本号写在 VERSION，改 skills/ 就升版本，CI 自动打 tag | 采纳 |
+| [0006](0006-issue-maintain-loop.md) | 用 issue 和每 6 小时一轮的 loop 维护仓库，非护栏、非不兼容的 PR 自动合并 | 采纳 |
