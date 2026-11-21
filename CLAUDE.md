@@ -1,6 +1,6 @@
 # skills-repo
 
-Agent Skills（SKILL.md 格式）。每个 `skills/jy-*` 目录是一个 skill，`.claude/skills/` 下是指向它们的软链接，供本仓库内使用。新增 skill 放进 `skills/`，并在 `.claude/skills/` 加一条 `../../skills/<name>` 软链接。
+Agent Skills（SKILL.md 格式）。每个 `skills/jy-*` 目录是一个 skill，`.claude/skills/` 下是指向它们的软链接，供本仓库内使用。新增 skill 放进 `skills/`，并在 `.claude/skills/` 加一条 `../../skills/<name>` 软链接、在 README 的 skill 表加一行（`scripts/repo_check.py check skills` 检查）。
 
 ## 开发流程
 
@@ -23,7 +23,7 @@ push 时 pre-push hook 跑 `scripts/review_gate.py`：3 个 Claude 分别从正�
 pre-commit install
 ```
 
-提交前会跑 ruff format、ruff check、shellcheck、YAML/JSON 校验，改到对应文件时还会跑 git guard、审查门禁和 constrain-check 脚本的单元测试。手动全量跑：`pre-commit run --all-files`。CI（`.github/workflows/ci.yml`）跑同一套配置。
+提交前会跑 ruff format、ruff check、shellcheck、YAML/JSON 校验、skill 软链接和 ADR 列表检查（`scripts/repo_check.py`）、Markdown 禁用修饰词检查，改到对应文件时还会跑 git guard、ADR guard、审查门禁和各脚本的单元测试。手动全量跑：`pre-commit run --all-files`。CI（`.github/workflows/ci.yml`）跑同一套配置。
 
 ## 约定
 

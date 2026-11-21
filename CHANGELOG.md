@@ -4,6 +4,12 @@
 
 每节分「不兼容」「新增」「修复」三类，没有的类别不写。「不兼容」里写清楚引用方要改什么。
 
+## 1.0.1 — 2026-11-21
+
+### 修复
+
+- `jy-repo-quiz`、`jy-repo-review`：SKILL.md 去掉全局 CLAUDE.md 禁用的空泛修饰词，改成具体说法（含 `jy-repo-quiz` 的 description，只换了一个词）。行为不变。
+
 ## 1.0.0 — 2026-11-21
 
 第一个带版本号的发布。包含 `jy-repo-review`、`jy-repo-quiz`、`jy-repo-constrain-check`、`jy-repo-codify` 四个 skill。
