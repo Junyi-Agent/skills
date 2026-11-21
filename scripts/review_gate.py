@@ -172,6 +172,7 @@ def main() -> int:
     head = os.environ.get("PRE_COMMIT_TO_REF") or "HEAD"
     if head == ZERO_SHA:  # branch deletion
         return 0
+
     try:
         base = git(root, "merge-base", BASE_REF, head).strip()
     except subprocess.CalledProcessError as e:
@@ -182,12 +183,14 @@ def main() -> int:
             file=sys.stderr,
         )
         return 1
+
     diff = git(root, "diff", f"{base}..{head}")
     if not diff.strip():
         print("review gate: nothing to review")
         return 0
     if len(diff) > MAX_DIFF_CHARS:
         diff = diff[:MAX_DIFF_CHARS] + "\n[diff truncated; read the files for the rest]\n"
+
     ctx = {
         "root": str(root),
         "base": base[:12],

@@ -488,6 +488,7 @@ def check_agent_gate(root: Path, hooks: list[Path]) -> Section:
         p = root / d
         if p.is_dir():
             candidates += [f for f in files_under(p) if f.stat().st_size < MAX_FILE]
+
     seen, hits = set(), []
     for f in candidates:
         if f in seen:
@@ -496,6 +497,7 @@ def check_agent_gate(root: Path, hooks: list[Path]) -> Section:
         a = grep(root, f, AGENT_CALL, limit=3)
         if a:
             hits.append((f, a, grep(root, f, QUORUM, limit=3), grep(root, f, SQUASH, limit=2)))
+
     stages = [
         h.name
         for h in hooks
@@ -507,9 +509,11 @@ def check_agent_gate(root: Path, hooks: list[Path]) -> Section:
         s.facts.append(
             f"⚠ 配置声明了 {', '.join(miss)} 阶段但本机未安装，挂在这些阶段上的门禁实际不会运行"
         )
+
     if not hits:
         s.facts.append("hook 和脚本目录里没有调用 agent（claude -p / codex exec / SDK 等）的地方")
         return s
+
     for f, a, q, sq in hits:
         s.facts.append(
             f"`{rel(root, f)}`：agent 调用 {len(a)} 处，quorum 信号 {len(q)} 处，squash/worktree 信号 {len(sq)} 处"
@@ -555,6 +559,7 @@ def check_worktree_doc(root: Path) -> Section:
     missing = [d for d in ("README.md", "CLAUDE.md", "AGENTS.md") if d not in present]
     if missing:
         s.facts.append(f"缺少：{', '.join(missing)}")
+
     wt, out, keep = [], [], []
     for d in present:
         p = root / d
@@ -566,11 +571,13 @@ def check_worktree_doc(root: Path) -> Section:
             limit=3,
         )
         keep += grep(root, p, KEEP_BRANCH, limit=3)
+
     s.evidence += wt[:8]
     s.facts.append(
         f"提到 worktree {len(wt)} 处；worktree 位置在目录外的信号 {len(out)} 处；不改当前分支的信号 {len(keep)} 处"
     )
     s.evidence += [f"分支：{k}" for k in keep[:3]]
+
     if not wt:
         s.verdict = "FAIL"
     elif out and keep:
@@ -617,6 +624,7 @@ def check_enforcement(root: Path, hooks: list[Path]) -> Section:
                 s.facts.append(
                     f"`{name}`：Claude Code hooks {ev or '无'}，deny 规则 {len(deny)} 条"
                 )
+
     ch = root / ".claude" / "hooks"
     if ch.is_dir():
         files = files_under(ch)
@@ -640,6 +648,7 @@ def check_enforcement(root: Path, hooks: list[Path]) -> Section:
         p = root / d
         if p.is_dir():
             flow += [f for f in p.iterdir() if f.is_file() and FLOW_NAME.search(f.name)]
+
     for mk in ("Makefile", "justfile", "Taskfile.yml"):
         p = root / mk
         if p.is_file():
@@ -654,6 +663,7 @@ def check_enforcement(root: Path, hooks: list[Path]) -> Section:
             if t:
                 s.evidence += t
                 found = True
+
     if flow:
         found = True
         s.facts.append("流程脚本：" + ", ".join(rel(root, f) for f in flow[:10]))
@@ -720,11 +730,13 @@ def gha_triggers(text: str) -> tuple[dict[str, str], int]:
             break
     else:
         return {}, 0
+
     inline = m.group(1)
     if inline.startswith("{"):  # flow mapping: keep the keys, filters are not parsed
         return dict.fromkeys(re.findall(r"([A-Za-z_]+)\s*:", inline), ""), start + 1
     if inline:  # `on: push` or `on: [push, pull_request]`
         return dict.fromkeys(re.findall(r"[A-Za-z_]+", inline), ""), start + 1
+
     events: dict[str, str] = {}
     indent, current = None, None
     for line in lines[start + 1 :]:
@@ -773,11 +785,13 @@ def check_ci(root: Path, remote: bool) -> Section:
         return s
     s.facts.append("CI 文件：" + ", ".join(rel(root, f) for f in files[:10]))
     text = "\n".join(read(f) for f in files)
+
     pc = root / ".pre-commit-config.yaml"
     if CI_PRECOMMIT.search(text) and pc.is_file():
         # CI runs the pre-commit config, so its lint and test hooks run in CI too
         text += "\n" + read(pc)
         s.facts.append("CI 跑 pre-commit，.pre-commit-config.yaml 里的检查一并计入")
+
     has = {
         k: bool(r.search(text))
         for k, r in (
@@ -786,6 +800,7 @@ def check_ci(root: Path, remote: bool) -> Section:
             ("部署/发布", CI_DEPLOY),
         )
     }
+
     # GitHub Actions: read the `on:` block. Other CI systems build every push by default.
     gha = [f for f in files if ".github" in f.parts]
     other = [f for f in files if f not in gha]
@@ -801,8 +816,10 @@ def check_ci(root: Path, remote: bool) -> Section:
                 f"触发：`{rel(root, f)}:{line}` {', '.join(events) or '（空）'}"
                 + (f"；push 过滤：{push[:120]}" if push else "")
             )
+
     order = ("PR 触发", "push 触发", "lint", "测试", "部署/发布")
     s.facts.append("；".join(f"{k}：{'有' if has[k] else '无'}" for k in order))
+
     weak = []
     for f in files:
         weak += grep(root, f, WEAK, limit=3)
@@ -831,10 +848,12 @@ def branch_protection(root: Path) -> str:
     m = re.search(r"github\.com[:/]([^/]+)/(.+?)(?:\.git)?/?$", url)
     if not m or not shutil.which("gh"):
         return ""
+
     branch = (
         git(root, "symbolic-ref", "--short", "refs/remotes/origin/HEAD").removeprefix("origin/")
         or "main"
     )
+
     try:
         r = subprocess.run(
             [
@@ -848,6 +867,7 @@ def branch_protection(root: Path) -> str:
         )
     except (OSError, subprocess.TimeoutExpired):
         return "分支保护：查询超时"
+
     if r.returncode != 0:
         return f"分支保护：`{branch}` 没有要求状态检查（或无权限查询）"
     try:
@@ -1059,7 +1079,9 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     checks.add_argument(
         "--no-remote", action="store_true", help="skip the GitHub branch protection query"
     )
+
     args = p.parse_args(argv)
+
     bad = [n for n in args.names if n not in CHECKS]
     if bad:
         checks.error(f"no such check: {', '.join(map(str, bad))} (choose from 1-8)")
@@ -1075,6 +1097,7 @@ def main() -> None:
     if top:
         root = Path(top)
     hooks = installed_hooks(hooks_dir(root)) if top else []
+
     run = {
         1: lambda: check_adr(root),
         2: lambda: check_git_precommit(root, hooks),
@@ -1085,11 +1108,14 @@ def main() -> None:
         7: lambda: check_ci(root, not args.no_remote),
         8: lambda: check_unix(root),
     }
+
     sections = [run[n]() for n in sorted(set(args.names or CHECKS))]
+
     if args.output == "json":
         out = {"root": str(root), "sections": [s.to_dict() for s in sections]}
         print(json.dumps(out, ensure_ascii=False, indent=2))
         return
+
     print(f"# 流程约束检查：{root}\n")
     print("| # | 检查项 | 初判 |\n|---|---|---|")
     for s in sections:

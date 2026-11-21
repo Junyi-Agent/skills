@@ -1,66 +1,89 @@
 ---
 type: review
-commit: 490459125291547db6f9a6cc69c03eb5a4bb78b7
-base: 0be9018fbf3e1ed8f078a351d1e56c07d65131a9
-date: 2026-11-20
+commit: 73d2b4c40f321210485ea15a6566a4961e3e30f7
+base: 490459125291547db6f9a6cc69c03eb5a4bb78b7
+date: 2026-11-21
 scope: incremental
 tags: [#review]
 ---
 
 # REVIEW
 
-**增量审查**：范围是 `0be9018..4904591` 的 2 个提交：#11（`66b2708`）修上次审查的问题，#12（`4904591`）提交 REVIEW.md、记录已知的故意设计、应用 constrain-check 的补法。改动的代码文件是 `git_guard.py`、`check.py`、`review_gate.py` 和它们的测试，另有 `build_good_repo.sh`、`.pre-commit-config.yaml`、ADR 0001 和 CLAUDE.md。改动约 590 行（不含 REVIEW.md）。按 skill 规则，四组维度由我依次审，核实交给一个新启动的 agent。上次的 9 条确认问题都逐条检查了修复。
+**增量审查**：范围是 `4904591..73d2b4c` 的 9 个提交（#13 至 #21）。改动的代码文件有 `git_guard.py`、`review_gate.py`、`check.py`、`ablation_report.py` 和它们的测试，以及新加的 `scripts/release.py`（含测试）、三个 eval fixture 脚本、`ci.yml` / `release.yml`、`.pre-commit-config.yaml`。改动的文档有 ADR 0001、0004、0005，CLAUDE.md、README、CHANGELOG，以及 `jy-repo-codify` / `jy-repo-constrain-check` / `jy-repo-review` 的 SKILL.md 和 evals。改动的代码约 1300 行，按 skill 规则四组维度由我依次审，核实交给 3 个新启动的 agent。上次的 6 条确认问题都逐条检查了修复。代码分块规则是 #20 新加的，这次对改动过的非测试代码文件整文件检查，测试文件没查。
 
 ## 1. 总体评价
 
-上次的 9 条都有对应测试，重放审查时的复现命令后全部被拒，pre-commit 全过。这次最重要的问题早在 #4 就已存在，前两次审查都漏了：`git_guard.py` 把换行替换成 `;` 后交给 `shlex`，而 `shlex` 默认把 `#` 当注释开头，所以多行命令里一个注释就让后面所有行不再检查。其余问题集中在 #11 新加的 heredoc 处理（正文脱离所属命令单独检查），以及 `check.py` 新写的 `on:` 解析把一种合法 YAML 写法漏掉了（相对上次是回退）。
+上次的 6 条在 #17 里都有对应测试，pre-commit 全过，新加的 `release.py`、kubectl 式 CLI 改造和 `-o json` 都工作正常，fixture 的 hash 与 README 一致。这次最重要的问题和上次的 `#` 注释一样，早在 #7 就存在：`git_guard.py` 把反斜杠续行拆成两条命令，续行后面的 `--no-verify`、子命令、目标分支都不再检查。其次是上次 heredoc 和 `env -S` 两处修复各漏了一种写法，以及 `release.py` 的 pre-push 检查对象不对。
 
 建议修复顺序：
 
-1. `git_guard.py` 的 `#` 注释问题（关掉 shlex 的 `commenters`，或按行处理注释）
-2. heredoc 正文按所属命令处理：cwd、前缀变量、只把喂给 shell 的正文当脚本（一并解决误拒文档的问题）
-3. `check.py` 支持零缩进的 `on:` 列表，`WEAK` 去掉 `verbose: true`
-4. `env -S`
+1. `git_guard.py` 的反斜杠续行（在 `strip_redirections` 里把 `\` + 换行整个删掉，和 shell 一样）
+2. `git_guard.py` 的 shell 读 stdin：`reads_script_from_stdin` 识别带取值的选项，here-string 喂给 shell 时按脚本检查
+3. `git_guard.py` 的 `env` 选项按 getopt 规则解析（合写的短选项、`-P` 等带取值的选项）
+4. `release.py` 在 pre-push 时检查被 push 的 ref，并且只在分支自己改了 VERSION 时才和 base 末端比较
+5. 代码分块、CLAUDE.md
 
 ## 2. 确认的问题
 
 ### 中
 
-**`.claude/hooks/git_guard.py:177` 未加引号的 `#` 吞掉命令剩余部分，包括后面的行**
-- 问题：`segments` 先把 `\n` 换成 ` ; `，再交给 `shlex`。`shlex` 默认 `commenters='#'`，遇到 `#` 就读到行尾，而换行已经不存在，于是整条命令的剩余部分都被丢掉。词中间的 `#`（如 `a#b`、URL 里的 `#frag`）也会触发，bash 对这种 `#` 按字面处理。
-- 核实（在临时仓库里）：
-  - 在 main 上，`echo hi # note\ngit commit -m x`、`echo a#b\ngit commit ...`、`echo a#b; git commit ...`、`curl -s http://x/#frag\ngit commit ...` 都放行；同样的命令去掉 `#` 后被拒。通过 hook 的 stdin JSON 跑也放行。
-  - 在 feature 上，`# step 1\ngit switch main` 放行。
-  - 用真 bash 执行前两条，main 上确实产生了提交。
-  - heredoc 也受影响：`bash <<'EOF'` 正文第一行是 `# don't` 时，整段正文都被丢掉。
-  - 单行的 `echo hi # x; git commit` 在 bash 里同样是注释，放行是对的，不算问题。
-- 没有注释、ADR 或测试提到注释。这个行为在 `b30f3f7`（#4）引入，早于本次范围，但 `segments` 在 #11 改过，所以一并上报。agent 常写带 `# step` 注释的多行命令，而 main 上的本地提交和原地切分支都没有服务端兜底。
+**`.claude/hooks/git_guard.py:190`（以及 123-127）反斜杠续行把一条命令拆成两条**
+- 问题：`strip_redirections` 把 `\` 和换行原样保留，第 190 行把换行替换成 ` ; ` 后变成 `\ ; `。shlex 把 `\ ` 读成一个只含空格的词，`;` 把命令切开，续行之后的词变成一条独立的“命令”。
+- 核实：`segments('git commit --allow-empty \\\n  --no-verify -m x')` 返回 `[['git','commit','--allow-empty',' '], ['--no-verify','-m','x']]`。下面三种写法写成一行都被拒，用 `\` 续行都放行，用真 bash 执行后果都发生了：
+  - main 上 `git \`↵`commit --allow-empty -m x`：main 上产生了提交。
+  - feature 上 `git commit --allow-empty \`↵`--no-verify -m x`：pre-commit hook 没有运行。
+  - feature 上 `git push origin \`↵`feat:main`：远端 main 被更新（本地裸仓库，没有分支保护）。
+  - 反方向也错：`git checkout \`↵`-- file` 被误拒，空格词被当成分支名。
+- 续行之前那段仍完整检查，`git commit \`↵`-m x` 在 main 上照样被拒，所以只有决定性的词落在续行之后才会漏。push 到 main 有服务端分支保护兜底，main 上的本地提交和 `--no-verify` 没有。docstring、ADR 0001、已知故意设计清单和测试（含 `test_agent_style_commands`）都没提到续行。反斜杠处理来自 `b9e9b61`（#7），审查者原定为高，核实者按上次 `#` 注释问题的标准调为中，我同意。
 
 ### 低
 
-**`.claude/hooks/git_guard.py:449-452` 喂给 shell 的 heredoc 正文脱离所属命令检查（上次 heredoc、`SKIP=`、`env -C` 三条的修复都不完整）**
-- 问题：正文在遍历各段之前统一检查，用的是整条命令开头的 cwd 和外层继承的变量，并且 `strict=False`。
-- 核实：
-  - cwd：从 feature 目录执行 `cd <main> && bash <<'EOF'\ngit commit ...\nEOF` 放行，同样的写法换成 `bash -c` 被拒。反方向也错：从 main 目录执行 `cd <feat> && bash <<EOF ...` 被误拒。
-  - 前缀变量：`SKIP=review-gate bash <<'EOF'\ngit push origin feat\nEOF` 放行，`SKIP=review-gate bash -c 'git push origin feat'` 被拒。ADR 0001 写的是 `bash -c` 前面的 `SKIP=` 会带进去，没有把 heredoc 排除在外。
-  - 解析失败：`check()` docstring 明确说正文“通常是文本”，所以不用 strict，这部分是有意的。正文里撇号在 git 之后时 bash 会先执行 git：`bash <<'EOF'\ngit commit ...\necho it's\nEOF` 被 hook 放行，main 上产生了提交。这与 ADR 0001 的“喂给 bash 的正文就是脚本”“解析不了且提到 git 时拒绝”不符。
-- 都是 #11（`66b2708`）引入的。
+**`.claude/hooks/git_guard.py:268-275` 带取值选项的 shell 读 stdin 时不检查 heredoc 正文（上次 heredoc 修复不完整）**
+- 问题：`reads_script_from_stdin` 要求参数全部以 `-`/`+` 开头或含 `-s`。`bash -o pipefail` 里的 `pipefail` 不满足，正文被当成数据跳过。
+- 核实：在 main 上，`bash -o pipefail <<'X'`、`bash -euo pipefail <<'X'`、`cat <<'X' | bash -o pipefail` 都放行，对照 `bash -e <<'X'` 被拒。真 bash 执行后 main 上产生了提交；在 feature 上正文里的 `--no-verify` 生效。`bash -O extglob` 同样会漏。#17 的提交说明和 ADR 0001 都写了喂给 shell 的正文按脚本检查。
 
-**`.claude/hooks/git_guard.py:215-226` `env -S '<命令>'` 不展开**
-- 问题：`env` 分支把 `-S` 当普通选项跳过，剩下的 `git push origin main` 是一个词，不等于 `git`。
-- 核实：在 feature 上，`env -S 'git push origin main'` 和 `env '-Sgit push origin main'` 都放行，对照 `env git push origin main` 被拒。在 main 上，`env -S 'git commit ...'` 放行，用 macOS 自带的 `env` 实际执行确实产生了提交。docstring 写的是“透过包装（含它们自己的选项）”。push main 有服务端兜底，main 上的本地提交没有。
+**`.claude/hooks/git_guard.py:89`、`137-162` here-string 喂给 shell 时内容不检查**
+- 问题：`<<<` 的目标被当成普通重定向目标丢掉，`bash <<< '<命令>'` 只剩下 `bash`。
+- 核实：`bash <<< 'git commit ...'` 用单引号、双引号都放行，真 bash 执行后 main 上产生了提交；feature 上 `--no-verify` 生效。CLAUDE.md 和 ADR 0001 列出拦不住的只有 `export SKIP=...` 后单独 push、`eval`、脚本文件，不包括 here-string；它和 ADR 承诺检查的 `bash <<EOF` 一样是把命令行里的字面文本喂给 shell。同类的 `echo '<命令>' | bash` 也放行，文档同样没提，修的时候一起定。
 
-**`skills/jy-repo-constrain-check/scripts/check.py:709` `on:` 下零缩进的列表读不到任何触发（相对上次是回退）**
-- 问题：`gha_triggers` 遇到缩进为 0 的行就结束 `on:` 块，`on:\n- push\n- pull_request` 这种写法的第一个列表项就被当成块结束。
-- 核实：`gha_triggers` 对这种写法返回 `({}, 2)`，`check_ci` 报“PR 触发：无；push 触发：无”，初判 WARN，证据显示“（空）”。PyYAML 和 Ruby 的 YAML 解析器都把它读成 `['push', 'pull_request']`，是合法写法。用 `0be9018` 的 `check.py` 跑同一个仓库，报的是“有/有”，因为旧正则 `^\s*-\s*push\s*$` 能匹配零缩进的列表项。测试只覆盖了缩进写法。judge 提示会让模型看触发证据，证据显示“（空）”，所以误判有机会被纠正。
+**`.claude/hooks/git_guard.py:241-248` `env` 的选项没有按 getopt 规则解析（上次 `env -S` 修复不完整）**
+- 问题：`-S` 和别的短选项合写时（`-vS`、`-iS'...'`）落到 `else` 只跳过一个词；`-P <altpath>` 带取值但不在 `ENV_VALUE_OPTS` 里，取值被当成命令名。
+- 核实：在 main 上，`env -iS'git commit ...'`、`env -vS 'git commit ...'`、`env -P /usr/bin git commit ...` 都放行，对照 `env -S '...'`、`env -i -S '...'` 被拒。用 macOS 的 `/usr/bin/env` 执行，三种都在 main 上产生了提交；feature 上 `env -vS` 带 `--no-verify` 时 hook 没运行。#17 的测试只覆盖了单独的 `-S`、`--split-string=` 和 `-S<命令>`。`-P` 一项是核实者发现的，原因相同，并入这条。
 
-**`.claude/hooks/git_guard.py:449-452` heredoc 正文不管喂给谁都按脚本检查，误拒写文档和 PR 正文（2026-11-20 用户确认不是有意的）**
-- 问题：只有喂给 shell 的正文才是脚本，`cat`、`gh pr create --body-file -`、`git commit -F -` 的正文是数据。
-- 核实：在 feature 分支上，`cat > notes.md <<'EOF'\ngit switch main\nEOF` 被拒，`gh pr create --body-file - <<'EOF'` 而正文里有一行 `git checkout -b foo` 也被拒。在 main 上往文件里写一行 `git commit -m x` 同样被拒。bash 只是把这些行写进文件。模块 docstring 和 `66b2708` 的提交说明写了“正文按脚本检查”，ADR 0001 只说“喂给 bash 的正文就是脚本”，没有任何地方提到这类误拒。`test_heredoc` 只测了正文外的 git 命令。修法和上面“正文脱离所属命令”那条一起做：正文跟着它所属的命令段检查，只有该段是 shell 时才当脚本。
+**`scripts/release.py:69-76` 落后于 origin/main 的分支，没改 skills/ 也会被拦**
+- 问题：版本比较用 `--base` 末端的 VERSION，改动判断用 merge base。main 期间升过版本时，一个只改 README 的分支 VERSION 低于 origin/main，pre-push 报“VERSION 1.0.0 低于 origin/main 上的 1.1.0”。
+- 核实：在临时仓库里装上 pre-push hook，真实 `git push origin feat` 被拒；rebase 后通过。docstring 字面上写了“不低于 REF 上的版本”，但 docstring、ADR 0005、#21 的提交说明都没提到这个副作用，ADR 0005 写的是只改 `scripts/` 等不用升版本。`test_lower_version_fails` 测的是分支主动把版本降低。CI 的 `pull_request` 检出的是合并提交，不会误报（推断，没在 Actions 上跑）。报错让人以为要升版本，实际要 rebase。
 
-**`skills/jy-repo-constrain-check/scripts/check.py:357` `verbose: true` 被当成放宽信号，第 3 项和第 7 项直接降为 WARN（2026-11-20 用户确认不是有意的，上两次列在“需要你确认”）**
-- 问题：`WEAK` 正则含 `verbose:\s*true\s*$`。pre-commit 的 `verbose` 只控制是否打印输出，不影响 hook 是否通过。
-- 修法：从 `WEAK` 里去掉这一项，并加一个“只有 `verbose: true` 时不降级”的测试。
+**`.pre-commit-config.yaml:50-56`（`release-version`）pre-push 检查的是当前 HEAD，不是被 push 的 ref**
+- 问题：`release.py` 读工作区的 VERSION、用 `{base}...HEAD` 算改动，不看 `PRE_COMMIT_TO_REF`。同仓库的 `review_gate.py:172` 用的是 `PRE_COMMIT_TO_REF`。
+- 核实：分支 A 合规、分支 B 改了 skills/ 没升版本。在 A 上 `git push origin B` 放行，B 被推上远端；在 B 上 `git push origin A` 被拒。两个方向都错。漏放的情况有 CI 兜底。
+
+**`CLAUDE.md:26` 本地检查一节漏了 release 脚本测试**
+- 问题：列出的单元测试只有 git guard、审查门禁、constrain-check，`.pre-commit-config.yaml` 里 #21 加的 `release-tests` 没写。#21 只在“约定”一节加了一行，没改这一句。
+
+**代码分块：下列函数体里做不同事的几段代码之间没有空行**（19 处，每处都单独核实）
+- `.claude/hooks/git_guard.py`
+  - 106-180 `strip_redirections`：初始化扫描状态、引号/转义/注释、重定向识别、截取 heredoc 正文
+  - 189-205 `segments`：准备 lexer、按标点分组 token
+  - 413-432 `check_pr_merge`：解析参数、运行 `gh pr checks`、生成拒绝信息
+  - 436-464 `check_git`：解析选项、hooksPath 检查、展开别名、跳过 hook 检查、切分支检查、main 上提交和 push 检查
+  - 472-535 `check`：解析命令、初始化状态栈、管道/heredoc 记账、递归检查嵌套 shell、按命令种类分派
+- `skills/jy-repo-constrain-check/scripts/check.py`
+  - 485-525 `check_agent_gate`：收集候选文件、grep 信号、hook 阶段、提前返回、写结论
+  - 553-587 `check_worktree_doc`：文档存在性、grep 信号、写 facts、定 verdict
+  - 604-627 `check_enforcement`：`.claude/settings*.json` 与 `.claude/hooks/` 两个来源
+  - 638-663 `check_enforcement`：流程脚本、Makefile 类目标、输出 facts
+  - 716-747 `gha_triggers`：定位 `on:`、行内写法、块状写法
+  - 761-811 `check_ci`：收集 CI 文件、并入 pre-commit 配置、检测 lint/测试/部署信号、触发分析（只用注释隔开）、汇总、放宽证据
+  - 830-857 `branch_protection`：解析 remote、定分支、调用 `gh api`、解析响应
+  - 1040-1067 `parse_args`：构建 parser、解析、校验
+  - 1072-1099 `main`：定 root 和 hooks、分派执行、JSON 输出、文本输出
+- `scripts/review_gate.py`
+  - 171-197 `main` 前半段：定 head、求 merge-base、取 diff 和截断、组装 ctx（后半段已分块）
+- `skills/jy-repo-review/evals/ablation_report.py`
+  - 50-68 `parse_args`：构建 parser、解析、校验
+  - 84-115 `case_result`：准备计数表、遍历 grading.json 计数、算通过率组 rows
+  - 136-148 `main`：加载输入、选 case、计算、输出
 
 ## 3. 需要你确认
 
@@ -68,57 +91,63 @@ tags: [#review]
 
 ## 4. 判定为故意设计
 
-- `git_guard.py:441-442` heredoc 正文解析失败时放行（`strict=False`）：`check()` 的 docstring 写明了理由，正文通常是文本。只是这个理由不适用于喂给 shell 的正文，那部分作为问题列在第 2 节。
+无。
 
 ## 5. 上次问题的处理情况
 
 | 上次的问题 | 状态 |
 |---|---|
-| heredoc 正文有撇号时整条命令跳过检查 | 数据型 heredoc 已修，有测试；喂给 bash 的正文仍有缺口，见第 2 节 |
-| `SKIP=` 不传进 `bash -c` | `bash -c` 已修，有测试；`SKIP=… bash <<EOF` 没覆盖，见第 2 节 |
-| CI 触发判断匹配整份 workflow | 已修，改为只读 `on:` 块，有测试；但漏掉零缩进列表，是回退，见第 2 节 |
-| `GIT_CONFIG_*` 设置 `core.hooksPath` | 已修，有测试 |
-| `env -C` / `--chdir=` / `pushd` 不跟随目录 | 已修，有测试；heredoc 正文仍用开头的 cwd，见第 2 节 |
-| `NO_COMMIT_OPTS` 误拦 / 漏拦 | 已修，有测试（含 `merge -n` 是 `--no-stat`） |
-| 包装命令的选项、git 别名 | `time -p`、`nohup --`、`command -p` 和别名（含 `!` 别名、`-c alias.*`、仓库配置里的别名）已修，有测试；`env -S` 没覆盖，见第 2 节 |
-| `MAX_DIFF_CHARS` 截断没有测试 | 已修 |
-| `build_good_repo.sh` 注释写 “seven” | 已修 |
+| 未加引号的 `#` 吞掉后面的行 | 已修，有测试（含 `a#b`、URL、heredoc 首行注释）；修复本身没引入新问题。同类的续行问题是另一处缺陷，见第 2 节 |
+| 喂给 shell 的 heredoc 正文脱离所属命令检查 | 已修，正文跟着所属命令走，用该 shell 的 cwd 和前缀变量，有测试；带取值选项的 shell 没覆盖，见第 2 节 |
+| `env -S` 不展开 | 单独写的 `-S`、`--split-string`、`-S<命令>` 已修，有测试；合写的短选项没覆盖，见第 2 节 |
+| `on:` 下零缩进的列表读不到 | 已修，有测试 |
+| heredoc 正文不管喂给谁都按脚本检查，误拒文档和 PR 正文 | 已修，有测试 |
+| `verbose: true` 被当成放宽信号 | 已修，有测试 |
 
 ## 6. 统计
 
-| 组 | 本次上报 | 确认 | 故意设计 | 证伪 | 无法判断 | 上次上报 / 确认 / 证伪 | 上上次 |
-|---|---|---|---|---|---|---|---|
-| 正确性 | 5 | 5（1 条经用户确认） | 0（1 条中的一个子项） | 0 | 0 | 8 / 8 / 0 | 12 / 11 / 0 |
-| 清理 | 0 | 0 | 0 | 0 | 0 | 0 / 0 / 0 | 2 / 2 / 0 |
-| 一致性 | 0 | 0 | 0 | 0 | 0 | 1 / 1 / 0 | 0 / 0 / 0 |
-| 设计与工程 | 0 | 0 | 0 | 0 | 0 | 0 / 0 / 0 | 3 / 3 / 0 |
+| 组 | 本次上报 | 确认 | 故意设计 | 证伪 | 无法判断 | 上次上报 / 确认 / 证伪 | 上上次 | 再上次 |
+|---|---|---|---|---|---|---|---|---|
+| 正确性 | 6 | 6 | 0 | 0 | 0 | 5 / 5 / 0 | 8 / 8 / 0 | 12 / 11 / 0 |
+| 清理 | 0 | 0 | 0 | 0 | 0 | 0 / 0 / 0 | 0 / 0 / 0 | 2 / 2 / 0 |
+| 一致性 | 5（1 条文档 + 4 条代码分块，共 19 处） | 5 | 0 | 0 | 0 | 0 / 0 / 0 | 1 / 1 / 0 | 0 / 0 / 0 |
+| 设计与工程 | 0 | 0 | 0 | 0 | 0 | 0 / 0 / 0 | 0 / 0 / 0 | 3 / 3 / 0 |
 
-- 连续三次都没有证伪的条目，不需要收紧哪一组的要求。
-- 反过来要注意漏报：`#` 注释问题从 #4 起就存在，前两次审查都在审 `git_guard.py` 的解析，却都没发现。两次的复现用例都是逐个构造的绕过写法，没有拿 agent 平时真正会写的多行命令（带注释、带 URL）来测。
-- 所有条目都逐条核实，没有抽查，5 条都在临时仓库里实际复现，其中 4 条用真 shell 确认了后果。
+- 连续四次没有证伪的条目，不需要收紧哪一组的要求。
+- 漏报仍要注意：续行问题从 #7 起就存在，和上次的 `#` 注释一样，是 agent 常写的多行命令形态。上次新增的 `test_agent_style_commands` 语料没有带续行的命令，建议补进去。
+- 所有条目都逐条核实，没有抽查。6 条正确性发现都在临时仓库里复现，4 条 `git_guard` 发现用真 shell 确认了后果，2 条 `release.py` 发现用真实的 `git push` 加 pre-push hook 确认。
+- 命令结构检查（#19 新加）：本仓库的入口 `check.py get checks`、`ablation_report.py get verdicts`、`release.py check version`、三个 fixture 脚本的 `create repo` 都满足 kubectl 式结构；`git_guard.py`、`review_gate.py`、`place-files.sh` 由调用方定死参数，不在范围内。没有上报。
 
 ## 7. 基线
 
-- commit：`490459125291547db6f9a6cc69c03eb5a4bb78b7`（2026-11-18 16:30 +0800，“Commit REVIEW.md, record known intentional behavior, apply constrain-check fixes (#12)”）。上次基线是 `0be9018`。
-- 审查期间 HEAD 和 `origin/main` 都没有新提交。工作目录里有一个未跟踪的 `skills/jy-repo-codify/`，不属于本次审查对象。下次增量审查以 `4904591` 为起点。
+- commit：`73d2b4c40f321210485ea15a6566a4961e3e30f7`（2026-11-21 15:46 +0800，“Add VERSION, CHANGELOG and automatic release tags (1.0.0) (#21)”）。上次基线是 `4904591`。
+- 审查期间 HEAD 和 `origin/main` 都没有新提交。下次增量审查以 `73d2b4c` 为起点。
 - 跑过的工具（都在固定 commit 的 worktree 拷贝里跑）：
-  - `pre-commit run --all-files`：全部通过，含三套单元测试和去掉 `--severity` 后的 shellcheck。
-  - `ruff 0.8.6 --select ALL`（排除项目未启用的风格类规则）：剩下的是 RUF001/RUF003 全角标点（中文字符串）、PLW1510、FURB167 等风格项。`git_guard.py` 的 BLE001 是 fail closed 有意捕获所有异常。
-  - `mypy`：无问题。
-  - `vulture`：1 条误报，`whitespace_split` 是属性赋值。
+  - `pre-commit run --all-files`：全部通过，含四套单元测试。
+  - `ruff 0.8.6 --select ALL`（排除项目未启用的风格类规则）：剩下的是 C901/PLR091x 复杂度、测试替身的 ARG001、PLW1510、FURB167 等，没有单独上报。`git_guard.py` 的 BLE001 是 fail closed 有意捕获所有异常。
+  - `mypy`：`release.py:43`、`:74` 报 4 条类型错误（`parse` 的返回类型写成 `tuple[int, int, int]`，实际推断是 `tuple[int, ...]`；`:74` 的比较前已经排除了 None），运行时不会出错，没有上报。
+  - `vulture`：4 条都是误报（shlex 的属性赋值、`__exit__(*exc)`）。
+  - `shellcheck`：无问题。
+  - 三个 fixture 脚本：`build_kvs.sh create repo full|incremental` 的 HEAD 是 `d8a3a01` / `abe905f`，`build_feeds.sh create repo` 的 HEAD 是 `e8e9bb3`，与 README 一致；`build_good_repo.sh create repo` 后 `check.py get checks 8` 列出了豁免 ADR，与脚本注释一致。
 - 没跑的：
-  - README 的安装步骤：会往 `~/.claude/skills` 写软链接。
+  - README 的安装步骤：会往别的项目写 submodule 和软链接。
   - `review_gate.py` 的真实 `claude` 调用：每次要起 3 个 Claude。
-  - ablation 的完整 eval 流程：需要 18 次完整审查，这次范围也没改到它。
+  - `release.yml`：要在 GitHub Actions 上跑。
+  - 各 skill 的完整 eval 流程。
 
-## 8. 后续处理（2026-11-20）
+## 8. 后续处理（2026-11-21）
 
-- 第 2 节的 6 条全部在 `fix-review-3` 分支修复，每条都有测试；新测试在修复前的代码上都会失败。
-  - `#` 注释：`strip_redirections` 只在词首把 `#` 当注释，跳到行尾；`shlex` 的 `commenters` 关掉。
-  - heredoc：正文在命令里留一个标记词，跟着所属命令走。只有喂给 shell 的正文（`bash <<EOF`、`cat <<EOF | bash`）才按脚本检查，用这个 shell 的 cwd 和前缀变量，解析失败且提到 git 时拒绝；其他正文是数据，不检查。`strict` 参数去掉了。
-  - `env -S` / `--split-string` 展开后继续解析。
-  - `check.py`：`on:` 下零缩进的列表能读到；`WEAK` 去掉 `verbose: true`。
-- 新增 `test_agent_style_commands`：按 agent 平时写的多行命令（注释、URL、heredoc 写的提交说明和 PR 正文）构造的回归语料，对应第 6 节说的漏报原因。
-- 另修了 push 时发现的问题：`review_gate.py` 在 `claude` 失败时只打印 stderr，而 `--output-format json` 把错误（如 “Not logged in”）放在 stdout 的 `result` 里，所以拒绝信息是空的。现在两处都会打印。
-- ADR 0001 同步了 heredoc、注释、`env -S` 的写法。
-- 下次增量审查仍以 `4904591` 为基线，范围包括 #13、#14 和这次的修复。
+第 2 节的问题全部在 `fix-review-4` 分支处理，正确性类每条都先写了测试，修复前的代码上这些测试都失败。
+
+- 反斜杠续行：`strip_redirections` 在单引号外遇到 `\` 加换行时把两个字符都删掉，和 shell 一样把两行接起来。`test_agent_style_commands` 补了带续行的提交和 push 命令。
+- shell 从 stdin 读脚本：`reads_script_from_stdin` 按 shell 的选项规则解析，`-o` / `-O` / `+o` 和 `--rcfile`、`--init-file` 会带走下一个词，`-` / `--` 结束选项；选项后面跟了脚本文件且没有 `-s` 时才算不读 stdin。
+- here-string：`<<<` 的词按正文切出来，跟着所属命令走，喂给 shell 时按脚本检查。按上次报告里留的问题一并处理了 `echo '...' | bash` 和 `printf ... | sh`，管道中间隔着 `tee` 或不带文件的 `cat` 也会传下去。别的命令的输出喂给 shell（`cat x.sh | bash`）和脚本文件同类，写进了 ADR 0001 的“后果”和 CLAUDE.md 的已知故意设计清单。
+- `env` 选项：新函数 `unwrap_env` 按 getopt 规则解析，短选项可以合写，`-u` / `-C` / `-S` / `-P` / `-a` 和对应的长选项带取值，`--` 结束选项，`-S` 展开后的词再按选项解析一遍。
+- `release.py`：
+  - 新增 `--ref`，从这个提交读 VERSION 和 CHANGELOG.md；pre-push 阶段传 `PRE_COMMIT_TO_REF`。40 个 0（删除分支）直接通过。
+  - 分支自 merge base 以来没改 `skills/` 也没改 VERSION 时，不和 `--base` 比较。落后的分支改了 `skills/` 时，报错提示先 rebase 再升版本。
+  - 用核实时的脚本在临时仓库里重放：在 A 上 `git push origin B` 现在被拒，在 B 上 `git push origin A` 放行；落后且只改 README 的分支能 push。
+- `CLAUDE.md:26`：#22（`cc2aae0`）改写这一句时已经改成“各脚本的单元测试”，不用再改。
+- 代码分块：第 2 节列的 19 处都加了空行；`git_guard.py`、`release.py` 这次新写和改写的函数也按同样的规则分块。
+- ADR 0001、ADR 0005 同步了上面的行为。`check.py`、`ablation_report.py` 在 `skills/` 下，VERSION 升到 1.0.2。
+- 下次增量审查以 `73d2b4c` 为基线，范围包括 #22 和这次的修复。

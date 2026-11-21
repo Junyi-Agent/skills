@@ -174,6 +174,8 @@ class GitGuardTest(unittest.TestCase):
             "git commit -q -m \"$(cat <<'EOF'\nFix the parser\n\nDon't drop lines\nEOF\n)\"",
             "git add a.py && git commit -q -F - <<'EOF'\nAdd thing\n\nIt's done.\nEOF",
             "for f in a b; do echo $f; done  # loop\ngit commit -m x",
+            "git add -A && \\\n  git commit -q \\\n    -m 'Fix the parser' \\\n    -m 'Body'",
+            "git \\\n  -c user.name=x \\\n  commit -m x",
         ]
         allow_on_feat = [
             "# Check the state first\ngit status\n\n# Then commit\ngit add -A && git commit -m x",
@@ -181,11 +183,104 @@ class GitGuardTest(unittest.TestCase):
             "- Don't run `git switch main` in place.\ngit checkout -b example\nEOF",
             "cat > notes.md <<'EOF'\n# Notes\ngit push origin main  # blocked by the hook\nEOF",
             "git push -u origin feature 2>&1 | tail -30",
+            "git push -u origin feature \\\n  2>&1 | tail -30",
+            "gh pr create --base main --title t \\\n  --body-file - <<'EOF'\nDon't merge yet\nEOF",
         ]
         for cmd in deny_on_main:
             self.assertTrue(self.denied(cmd, main), cmd)
         for cmd in allow_on_feat:
             self.assertFalse(self.denied(cmd, feat), cmd)
+
+    def test_line_continuation(self):
+        """`\\` + newline joins the lines, as in the shell; it does not end the command."""
+        self.assertTrue(self.denied("git \\\n  commit -m x", self.main))
+        self.assertTrue(self.denied('git commit -m "a \\\n b"', self.main))
+        for cmd in (
+            "git commit -m x \\\n  --no-verify",
+            "git push origin \\\n  feature:main",
+            "git push -u origin feature \\\n  --no-verify",
+            f"git -C {self.main} \\\n  commit -m x",
+        ):
+            self.assertTrue(self.denied(cmd, self.feat), cmd)
+        self.assertFalse(self.denied("git checkout \\\n  -- a.py", self.feat))
+        self.assertFalse(self.denied("git commit -m x \\\n  -m y", self.feat))
+        # inside single quotes a backslash is literal and the newline stays
+        self.assertFalse(self.denied("echo 'a \\\n git commit -m x'", self.main))
+
+    def test_shell_reading_stdin(self):
+        """A shell with no script argument (or with -s) runs what comes on stdin."""
+        body = "<<'EOF'\ngit commit -m x\nEOF"
+        for shell in (
+            "bash -o pipefail",
+            "bash -euo pipefail",
+            "bash -O extglob",
+            "bash +o posix",
+            "bash --norc --noprofile",
+            "bash --rcfile /dev/null",
+            "bash -s arg1",
+            "bash -",
+            "bash -- ",
+            "zsh -o errexit",
+        ):
+            self.assertTrue(self.denied(f"{shell} {body}", self.main), shell)
+        self.assertTrue(
+            self.denied("cat <<'EOF' | bash -o pipefail\ngit commit -m x\nEOF", self.main)
+        )
+        for shell in ("bash script.sh", "bash -o pipefail script.sh", "bash -- script.sh"):
+            self.assertFalse(self.denied(f"{shell} {body}", self.main), shell)
+
+    def test_here_string_fed_to_shell(self):
+        for cmd in (
+            "bash <<< 'git commit -m x'",
+            'bash <<< "git commit -m x"',
+            "sh -e <<<'git commit -m x'",
+            "bash <<< 'git commit -m x' <<'EOF'\nignored\nEOF",
+        ):
+            self.assertTrue(self.denied(cmd, self.main), cmd)
+        self.assertTrue(self.denied("bash <<< 'git push origin main'", self.feat))
+        for cmd in ("cat <<< 'git commit -m x'", 'grep x <<< "git commit -m x"'):
+            self.assertFalse(self.denied(cmd, self.main), cmd)
+
+    def test_echo_piped_to_shell(self):
+        for cmd in (
+            "echo 'git commit -m x' | bash",
+            "echo -n git commit -m x | sh",
+            "printf '%s\\n' 'git commit -m x' | bash",
+            "printf 'git status\\ngit commit -m x\\n' | bash -e",
+        ):
+            self.assertTrue(self.denied(cmd, self.main), cmd)
+        # `tee` and `cat` pass their stdin on
+        for cmd in (
+            "cat <<'EOF' | tee log.txt | bash\ngit commit -m x\nEOF",
+            "echo 'git commit -m x' | cat | sh",
+        ):
+            self.assertTrue(self.denied(cmd, self.main), cmd)
+        for cmd in (
+            "echo 'git commit -m x' | grep git",
+            "echo 'git status' | bash",
+            "echo 'git commit -m x' | cat notes.md | bash",
+        ):
+            self.assertFalse(self.denied(cmd, self.main), cmd)
+
+    def test_env_options_like_getopt(self):
+        for cmd in (
+            "env -iS'git push origin main'",
+            "env -vS 'git push origin main'",
+            "env -iS 'git push origin main'",
+            "env -P /usr/bin git push origin main",
+            "env -P/usr/bin git push origin main",
+            "env -uFOO git push origin main",
+            "env --unset FOO git push origin main",
+            "env --unset=FOO git push origin main",
+            "env -i -- git push origin main",
+            "env - git push origin main",
+            "env -S '-i git push origin main'",
+            f"env -iC {self.main} git commit -m x",
+            f"env -iC{self.main} git commit -m x",
+        ):
+            self.assertTrue(self.denied(cmd, self.feat), cmd)
+        self.assertFalse(self.denied(f"env -iC {self.feat} git commit -m x", self.main))
+        self.assertFalse(self.denied("env -vS 'git push origin feature'", self.feat))
 
     def test_subshell_scopes_cd(self):
         self.assertTrue(self.denied(f"(cd {self.main} && git commit -m x)", self.feat))

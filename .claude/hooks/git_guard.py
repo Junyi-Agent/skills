@@ -9,12 +9,14 @@ passed (`gh pr merge`, or the merge endpoint through `gh api`).
 The branch is read from the directory each git command actually runs in: `cd <dir>`,
 `pushd`/`popd` earlier in the same command, `( ... )` subshells, `env -C <dir>` and
 `git -C <dir>` are all followed. Wrappers are looked through: `env VAR=x`, `command`,
-`exec`, `nohup`, `time`, `env -S` (with their options), and `bash -c '...'`, which also
-inherits the `VAR=x` words in front of it. Git aliases are expanded. A heredoc body fed to
-a shell (`bash <<EOF`, or `cat <<EOF | bash`) is checked as a script, in the directory
-and environment of that shell; other heredoc bodies are data and are not checked. Shell
-comments are skipped. If the hook input cannot be read, the check itself fails, or a
-command (or shell-fed heredoc) that mentions git/gh cannot be parsed, it is denied.
+`exec`, `nohup`, `time`, `env -S` (with their options, parsed like getopt), and
+`bash -c '...'`, which also inherits the `VAR=x` words in front of it. Git aliases are
+expanded. Text fed to a shell that reads its script from stdin (`bash <<EOF`,
+`bash <<< '...'`, `cat <<EOF | bash`, `echo '...' | bash`) is checked as a script, in the
+directory and environment of that shell; other heredoc bodies are data and are not
+checked. Shell comments are skipped and backslash-newline line continuations are joined.
+If the hook input cannot be read, the check itself fails, or a command (or shell-fed text)
+that mentions git/gh cannot be parsed, it is denied.
 """
 
 from __future__ import annotations
@@ -65,8 +67,13 @@ SWITCH_OPTS = {"-b", "-B", "--orphan", "--detach", "-t", "--track"}
 # Prefixes that run the rest of the words as a command, and their options that take a value.
 WRAPPERS = {"command", "exec", "nohup", "time", "builtin"}
 WRAPPER_VALUE_OPTS = {"-a", "-f", "-o", "--format", "--output"}
-ENV_VALUE_OPTS = {"-u", "--unset"}
+# `env` options that take a value (GNU and BSD), as short letters and long names.
+ENV_VALUE_SHORT = "uCSPa"
+ENV_VALUE_LONG = {"--unset", "--chdir", "--split-string", "--argv0"}
 SHELLS = {"bash", "sh", "zsh", "dash", "ksh"}
+# Shell options that take the next word as their value: `-o pipefail`, `-O extglob`.
+SHELL_VALUE_FLAGS = "oO"
+SHELL_VALUE_LONG = {"--rcfile", "--init-file"}
 # Git does not let an alias shadow a built-in command, so these are never looked up.
 GIT_BUILTINS = {
     "add", "am", "apply", "archive", "bisect", "blame", "branch", "bundle", "cat-file",
@@ -99,18 +106,24 @@ def strip_redirections(command: str) -> tuple[str, list[str]]:
     Without this, `gh pr merge 6 2>&1` would pass `2>` to `gh pr checks` as the PR selector.
     A leading fd number counts only when it is the whole unquoted word, as in the shell.
     A `#` starts a comment only at the start of a word (`a#b` and `$#` are not comments).
-    Heredoc bodies are cut out of the command and returned separately, so an apostrophe
-    in them does not break parsing; each leaves a HEREDOC marker word in its command, so
-    the caller knows which command reads it.
+    A `\\` before a newline, outside single quotes, is a line continuation: both go.
+    Heredoc bodies and here-string words are cut out of the command and returned
+    separately, so an apostrophe in them does not break parsing; each leaves a HEREDOC
+    marker word in its command, so the caller knows which command reads it.
     """
     out: list[str] = []
     bodies: list[str] = []
-    pending: list[tuple[str, bool]] = []  # heredoc delimiters waiting for the end of line
+    pending: list[tuple[int, str, bool]] = []  # heredocs waiting for the end of the line
     quote = ""
     word_start, word_quoted = 0, False
     i, n = 0, len(command)
+
     while i < n:
         c = command[i]
+        if c == "\\" and command.startswith("\n", i + 1) and quote != "'":
+            i += 2  # line continuation
+            continue
+
         if quote:
             out.append(c)
             if c == "\\" and quote == '"' and i + 1 < n:
@@ -120,6 +133,7 @@ def strip_redirections(command: str) -> tuple[str, list[str]]:
                 quote = ""
             i += 1
             continue
+
         if c == "\\" and i + 1 < n:
             out.append(command[i : i + 2])
             word_quoted = True
@@ -130,15 +144,18 @@ def strip_redirections(command: str) -> tuple[str, list[str]]:
             out.append(c)
             i += 1
             continue
+
         if c == "#" and word_start == len(out):  # comment: skip to the end of the line
             j = command.find("\n", i)
             i = n if j < 0 else j
             continue
+
         op = next((o for o in REDIRECT_OPS if command.startswith(o, i)), "")
         if op and not command.startswith("(", i + len(op)):  # `<(..)` is process substitution
             word = "".join(out[word_start:])
             if word.isdigit() and not word_quoted:
                 del out[word_start:]  # fd number, e.g. the 2 in 2>&1
+
             i += len(op)
             while i < n and command[i] in " \t":
                 i += 1
@@ -153,17 +170,22 @@ def strip_redirections(command: str) -> tuple[str, list[str]]:
                 elif ch == "\\":
                     i += 1
                 i += 1
+
+            if op in ("<<", "<<-", "<<<"):
+                out.append(f" {HEREDOC}{len(bodies)}")
+                # a here-string's word is its text; a heredoc's body is filled in below
+                bodies.append(dequote(command[start:i]) if op == "<<<" else "")
             if op in ("<<", "<<-"):
                 delim = re.sub(r"[\"'\\]", "", command[start:i])
-                out.append(f" {HEREDOC}{len(bodies) + len(pending)}")
-                pending.append((delim, op == "<<-"))
+                pending.append((len(bodies) - 1, delim, op == "<<-"))
             out.append(" ")
             word_start, word_quoted = len(out), False
             continue
+
         out.append(c)
         i += 1
         if c == "\n" and pending:
-            for delim, strip_tabs in pending:
+            for index, delim, strip_tabs in pending:
                 lines = []
                 while i < n:
                     j = command.find("\n", i)
@@ -173,11 +195,20 @@ def strip_redirections(command: str) -> tuple[str, list[str]]:
                     if (line.lstrip("\t") if strip_tabs else line) == delim:
                         break
                     lines.append(line)
-                bodies.append("\n".join(lines))
+                bodies[index] = "\n".join(lines)
             pending.clear()
         if c in WORD_END:
             word_start, word_quoted = len(out), False
+
     return "".join(out), bodies
+
+
+def dequote(word: str) -> str:
+    """The text of a shell word (`'a b'` -> `a b`), or the word itself if it cannot be split."""
+    try:
+        return " ".join(shlex.split(word))
+    except ValueError:
+        return word
 
 
 def segments(command: str) -> tuple[list[list[str]], list[str]]:
@@ -190,6 +221,7 @@ def segments(command: str) -> tuple[list[list[str]], list[str]]:
     lexer = shlex.shlex(command.replace("\n", " ; "), posix=True, punctuation_chars=PUNCT)
     lexer.whitespace_split = True
     lexer.commenters = ""  # strip_redirections already dropped the comments
+
     out: list[list[str]] = [[]]
     for tok in lexer:
         if not tok or any(c not in PUNCT for c in tok):
@@ -202,6 +234,7 @@ def segments(command: str) -> tuple[list[list[str]], list[str]]:
                 out += [["|"], []]
             elif out[-1]:
                 out.append([])
+
     return [s for s in out if s], bodies
 
 
@@ -229,23 +262,7 @@ def unwrap(seg: list[str], cwd: str) -> tuple[list[str], set[str], str]:
             flags |= env_flags(word)
             seg = seg[1:]
         elif word == "env":
-            seg = seg[1:]
-            while seg and seg[0].startswith("-"):
-                opt = seg[0]
-                if opt in ("-C", "--chdir") and len(seg) > 1:
-                    cwd = resolve(cwd, seg[1])
-                    seg = seg[2:]
-                elif opt.startswith("--chdir="):
-                    cwd = resolve(cwd, opt.split("=", 1)[1])
-                    seg = seg[1:]
-                elif opt in ("-S", "--split-string") and len(seg) > 1:
-                    seg = shlex.split(seg[1]) + seg[2:]  # `env -S 'git push'`
-                elif opt.startswith("--split-string="):
-                    seg = shlex.split(opt.split("=", 1)[1]) + seg[1:]
-                elif opt.startswith("-S") and len(opt) > 2:
-                    seg = shlex.split(opt[2:]) + seg[1:]
-                else:
-                    seg = seg[2:] if opt in ENV_VALUE_OPTS else seg[1:]
+            seg, cwd = unwrap_env(seg[1:], cwd)
         elif word in WRAPPERS:
             seg = seg[1:]
             while seg and seg[0].startswith("-"):
@@ -253,6 +270,44 @@ def unwrap(seg: list[str], cwd: str) -> tuple[list[str], set[str], str]:
         else:
             break
     return seg, flags, cwd
+
+
+def unwrap_env(args: list[str], cwd: str) -> tuple[list[str], str]:
+    """Parse `env` options like getopt: `-iS'git push'`, `-P <dir>`, `--unset=X`, `--`.
+
+    Returns the words after the options and the directory (`-C <dir>`). `-S <string>` is
+    split into words that are parsed again, so options inside it count too.
+    """
+    while args and args[0].startswith("-"):
+        opt, args = args[0], args[1:]
+        if opt == "--":
+            break
+        if opt.startswith("--"):
+            name, eq, value = opt.partition("=")
+            if name in ENV_VALUE_LONG and not eq:
+                if not args:
+                    break
+                value, args = args[0], args[1:]
+            if name == "--chdir":
+                cwd = resolve(cwd, value)
+            elif name == "--split-string":
+                args = shlex.split(value) + args
+            continue
+
+        for k, letter in enumerate(opt[1:], 2):  # `-` alone is `-i`: no letters
+            if letter not in ENV_VALUE_SHORT:
+                continue
+            value = opt[k:]
+            if not value:
+                if not args:
+                    break
+                value, args = args[0], args[1:]
+            if letter == "C":
+                cwd = resolve(cwd, value)
+            elif letter == "S":
+                args = shlex.split(value) + args
+            break
+    return args, cwd
 
 
 def shell_script(seg: list[str]) -> str | None:
@@ -266,13 +321,52 @@ def shell_script(seg: list[str]) -> str | None:
 
 
 def reads_script_from_stdin(seg: list[str]) -> bool:
-    """`bash`, `sh -e`, `bash -s arg` ...: a shell that runs whatever comes on stdin."""
+    """`bash`, `bash -euo pipefail`, `bash -s arg` ...: a shell that runs what comes on stdin.
+
+    It does unless a script file follows the options; `-s` reads stdin even then.
+    """
     if not seg or os.path.basename(seg[0]) not in SHELLS:
         return False
+    args, i, stdin_flag = seg[1:], 0, False
+
+    while i < len(args):
+        a = args[i]
+        if a in ("-", "--"):
+            i += 1
+            break
+        if a.startswith("--"):
+            i += 2 if a in SHELL_VALUE_LONG else 1
+            continue
+        if len(a) < 2 or a[0] not in "-+":
+            break
+        stdin_flag |= a[0] == "-" and "s" in a
+        i += 1 + sum(letter in SHELL_VALUE_FLAGS for letter in a[1:])
+
+    return stdin_flag or i >= len(args)
+
+
+def passes_stdin_on(seg: list[str]) -> bool:
+    """`tee file` and `cat` (no files, or `-`) write their stdin on to the next command."""
+    if not seg:
+        return False
+    files = [a for a in seg[1:] if a == "-" or not a.startswith("-")]
+    return seg[0] == "tee" or (seg[0] == "cat" and (not files or "-" in files))
+
+
+def printed_text(seg: list[str]) -> list[str]:
+    """What `echo ...` or `printf ...` writes, as text a shell after a pipe would run."""
+    if not seg or seg[0] not in ("echo", "printf"):
+        return []
     args = seg[1:]
-    return all(a.startswith(("-", "+")) for a in args) or any(
-        re.fullmatch(r"-[a-zA-Z]*s[a-zA-Z]*", a) for a in args
-    )
+    if seg[0] == "echo":
+        while args and re.fullmatch(r"-[neE]+", args[0]):
+            args = args[1:]
+        text = " ".join(args)
+    else:
+        if args[:1] == ["-v"]:  # `printf -v var` assigns, prints nothing
+            return []
+        text = "\n".join(args)
+    return [text.replace("\\n", "\n")]
 
 
 def resolve(base: str, path: str) -> str:
@@ -423,6 +517,7 @@ def check_pr_merge(rest: list[str], cwd: str) -> str | None:
         elif not a.startswith("-"):
             selector = [a]
         i += 1
+
     code, output = pr_checks(selector + repo, cwd)
     if code == 0:
         return None
@@ -435,23 +530,28 @@ def check_pr_merge(rest: list[str], cwd: str) -> str | None:
 def check_git(seg: list[str], cwd: str, flags: set[str]) -> str | None:
     git_cwd, sub, rest, configs = parse_git(seg[1:], cwd)
     opts = seg[1 : len(seg) - len(rest)]  # global options before the subcommand
+
     if (
         "hookspath" in flags
         or any("hookspath" in a.lower() for a in opts)
         or (sub == "config" and any("hookspath" in a.lower() for a in rest))
     ):
         return BYPASS_MSG
+
     sub, rest, shell = expand_alias(sub, rest, configs, git_cwd)
     if shell is not None:  # `!` alias: git runs it from the top of the work tree
         return check(shell, git_cwd, flags)
+
     if sub in ("commit", "push", "merge") and ("skip" in flags or "--no-verify" in rest):
         return BYPASS_MSG
     if sub == "commit" and any(re.fullmatch(r"-[a-zA-Z]*n[a-zA-Z]*", a) for a in rest):
         return BYPASS_MSG
+
     if sub == "switch":
         return SWITCH_MSG
     if sub == "checkout" and checkout_switches(rest, git_cwd):
         return SWITCH_MSG
+
     if creates_commit(sub, rest) and current_branch(git_cwd) == PROTECTED:
         return COMMIT_MSG
     if sub == "push":
@@ -474,10 +574,12 @@ def check(command: str, cwd: str, inherited: set[str] | None = None) -> str | No
         segs, bodies = segments(command)
     except ValueError:  # unbalanced quotes
         return PARSE_MSG if GIT_WORD.search(command) else None
+
     stack: list[str] = []  # cwd outside each `( ... )`
     dirs: list[str] = []  # pushd stack
-    piped: list[str] = []  # heredoc bodies of the previous command, if it pipes into this one
-    last: list[str] = []  # heredoc bodies of the previous command
+    piped: list[str] = []  # text the previous command pipes into this one
+    last: list[str] = []  # heredoc bodies and echo/printf text of the previous command
+
     for raw in segs:
         if raw == ["|"]:
             piped = last
@@ -489,24 +591,28 @@ def check(command: str, cwd: str, inherited: set[str] | None = None) -> str | No
         if raw == [")"]:
             cwd = stack.pop() if stack else cwd
             continue
-        last = [bodies[int(w[len(HEREDOC) :])] for w in raw if w.startswith(HEREDOC)]
-        stdin = last + stdin
+
+        own = [bodies[int(w[len(HEREDOC) :])] for w in raw if w.startswith(HEREDOC)]
+        stdin = own + stdin
         seg, flags, seg_cwd = unwrap([w for w in raw if not w.startswith(HEREDOC)], cwd)
         flags |= inherited
+        last = own + printed_text(seg) + (stdin if passes_stdin_on(seg) else [])
         if not seg:
             continue
+
         script = shell_script(seg)
         if script is not None:
             reason = check(script, seg_cwd, flags)
             if reason:
                 return reason
             continue
-        if reads_script_from_stdin(seg):  # `bash <<EOF` or `cat <<EOF | bash`
+        if reads_script_from_stdin(seg):  # `bash <<EOF`, `cat <<EOF | bash`, `echo .. | sh`
             for body in stdin:
                 reason = check(body, seg_cwd, flags)
                 if reason:
                     return reason
             continue
+
         if seg[0] == "cd":
             cwd = resolve(cwd, seg[1]) if len(seg) > 1 else os.path.expanduser("~")
             continue
@@ -519,6 +625,7 @@ def check(command: str, cwd: str, inherited: set[str] | None = None) -> str | No
         if seg[0] == "popd":
             cwd = dirs.pop() if dirs else cwd
             continue
+
         if seg[0] == "gh" and seg[1:3] == ["pr", "merge"]:
             reason = check_pr_merge(seg[3:], seg_cwd)
             if reason:
@@ -532,6 +639,7 @@ def check(command: str, cwd: str, inherited: set[str] | None = None) -> str | No
             reason = check_git(seg, seg_cwd, flags)
             if reason:
                 return reason
+
     return None
 
 

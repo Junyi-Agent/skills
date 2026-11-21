@@ -14,14 +14,14 @@
   - Y：新增 skill、新增检查项或规则、新增参数。会让原来通过的检查出现新的 ⚠️，也算 Y，在 CHANGELOG 里写明
   - Z：修 bug、改措辞，行为不变
 - 改了 `skills/` 下任何文件就要升版本，并在 `CHANGELOG.md` 顶部加一节。只改 `scripts/`、`.claude/`、`docs/`、CI 等不影响引用方的文件，不用升。
-- 强制方式：`scripts/release.py check version --base origin/main` 检查 VERSION 格式、CHANGELOG 第一节与 VERSION 一致、改了 `skills/` 时版本比 `origin/main` 高。pre-commit 的 pre-push 阶段和 CI 都跑。
+- 强制方式：`scripts/release.py check version --base origin/main` 检查 VERSION 格式、CHANGELOG 第一节与 VERSION 一致、改了 `skills/` 时版本比 `origin/main` 高。分支没改 `skills/` 也没改 VERSION 时不和 `origin/main` 比，落后于 `origin/main` 不算错。pre-commit 的 pre-push 阶段和 CI 都跑；pre-push 阶段用 `--ref` 检查正在被 push 的提交，不是当前检出的那个。
 - 打 tag：`.github/workflows/release.yml` 在 `main` 上 VERSION 变化时，若 `vX.Y.Z` 不存在，就在该提交上建 tag 和 GitHub Release，说明取 CHANGELOG 对应的那一节。不手动打 tag。
 - 从 1.0.0 开始：已经有别的项目在用，用 1.x 让 X 的变化明确表示不兼容。
 
 ## 后果
 
 - 每个改 `skills/` 的 PR 都是一次发布，PR 多时版本号涨得快，但引用方能精确锁定。
-- 两个 PR 同时升到同一个版本号时，后合并的那个在 rebase 后会被检查拦下（版本不高于 `origin/main`），要再升一次。
+- 两个 PR 同时升到同一个版本号时，后合并的那个在 rebase 后会被检查拦下（版本不高于 `origin/main`），要再升一次。改了 `skills/` 的分支落后于升过版本的 `origin/main` 时，报错会提示先 rebase 再升版本。
 - X / Y / Z 选哪个靠人和 agent 判断，脚本只检查“有没有升”。
 
 ## 验证

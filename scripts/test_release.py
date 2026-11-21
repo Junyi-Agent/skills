@@ -172,10 +172,62 @@ class BumpTest(unittest.TestCase):
         )
         self.assertEqual(self.repo.run(*CHECK, "--base", "base").returncode, 0)
 
+    def test_behind_branch_without_skill_changes_passes(self):
+        """A branch made before base bumped the version, touching only other files."""
+        self.repo.git("checkout", "-q", "-b", "feat")
+        self.repo.commit({"README.md": "changed\n"})
+        self.repo.git("checkout", "-q", "base")
+        self.repo.commit(
+            {"skills/a/SKILL.md": "b\n", "VERSION": "1.3.0\n", "CHANGELOG.md": changelog("1.3.0")}
+        )
+        self.repo.git("checkout", "-q", "feat")
+        p = self.repo.run(*CHECK, "--base", "base")
+        self.assertEqual(p.returncode, 0, p.stderr)
+
+    def test_behind_branch_with_skill_change_needs_rebase(self):
+        self.repo.git("checkout", "-q", "-b", "feat")
+        self.repo.commit(
+            {"skills/a/SKILL.md": "f\n", "VERSION": "1.2.1\n", "CHANGELOG.md": changelog("1.2.1")}
+        )
+        self.repo.git("checkout", "-q", "base")
+        self.repo.commit({"VERSION": "1.3.0\n", "CHANGELOG.md": changelog("1.3.0")})
+        self.repo.git("checkout", "-q", "feat")
+        p = self.repo.run(*CHECK, "--base", "base")
+        self.assertEqual(p.returncode, 1)
+        self.assertIn("低于 base 上的 1.3.0", p.stderr)
+        self.assertIn("rebase", p.stderr)
+
+    def test_ref_is_checked_instead_of_the_work_tree(self):
+        """pre-push passes the pushed commit, which need not be the checked-out one."""
+        self.repo.commit({"skills/a/SKILL.md": "no bump\n"})
+        self.repo.git("branch", "bad")
+        self.repo.git("reset", "-q", "--hard", "base")
+        self.repo.commit({"README.md": "fine\n"})
+        p = self.repo.run(*CHECK, "--base", "base", "--ref", "bad")
+        self.assertEqual(p.returncode, 1)
+        self.assertIn("skills/a/SKILL.md", p.stderr)
+        self.assertEqual(self.repo.run(*CHECK, "--base", "base", "--ref", "HEAD").returncode, 0)
+        # the work tree does not matter with --ref
+        self.repo.write({"VERSION": "bad\n"})
+        self.assertEqual(self.repo.run(*CHECK, "--base", "base", "--ref", "HEAD").returncode, 0)
+
+    def test_ref_without_files(self):
+        self.repo.commit({"VERSION": None})
+        p = self.repo.run(*CHECK, "--ref", "HEAD")
+        self.assertEqual(p.returncode, 1)
+        self.assertIn("VERSION 文件不存在", p.stderr)
+
+    def test_null_ref_is_a_deleted_branch(self):
+        p = self.repo.run(*CHECK, "--base", "base", "--ref", "0" * 40)
+        self.assertEqual((p.returncode, p.stderr), (0, ""))
+
     def test_unknown_base_is_a_git_error(self):
         p = self.repo.run(*CHECK, "--base", "no-such-ref")
         self.assertEqual(p.returncode, 2)
         self.assertIn("release.py: git diff", p.stderr)
+        p = self.repo.run(*CHECK, "--ref", "no-such-ref")
+        self.assertEqual(p.returncode, 2)
+        self.assertIn("release.py: git rev-parse", p.stderr)
 
 
 if __name__ == "__main__":
