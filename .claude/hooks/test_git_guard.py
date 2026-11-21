@@ -4,11 +4,13 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import git_guard
@@ -429,6 +431,85 @@ class GitGuardTest(unittest.TestCase):
     def test_merge_via_api(self):
         self.assertTrue(self.denied("gh api -X PUT repos/o/r/pulls/3/merge", self.main))
         self.assertFalse(self.denied("gh api repos/o/r/pulls/3", self.main))
+
+
+class LoopModeTest(unittest.TestCase):
+    """JY_MAINTAIN_LOOP=1: the rules for the jy-repo-maintain loop (docs/adr/0006)."""
+
+    def setUp(self):
+        self.env = mock.patch.dict(os.environ, {"JY_MAINTAIN_LOOP": "1"})
+        self.env.start()
+        self.checks = mock.patch.object(git_guard, "pr_checks", return_value=(0, ""))
+        self.checks.start()
+        self.policy = mock.patch.object(git_guard, "maintain_policy", return_value=(0, ""))
+        self.policy_mock = self.policy.start()
+
+    def tearDown(self):
+        mock.patch.stopall()
+
+    def denied(self, cmd: str) -> bool:
+        return check(cmd, "/") is not None
+
+    def test_off_without_env(self):
+        with mock.patch.dict(os.environ, {"JY_MAINTAIN_LOOP": ""}):
+            self.assertFalse(self.denied("gh secret set X"))
+            self.assertFalse(self.denied("gh issue edit 3 --add-label accepted"))
+
+    def test_only_listed_gh_commands(self):
+        for cmd in (
+            "gh issue list --state open",
+            "gh issue comment 3 --body-file c.md",
+            "gh pr create --title t --body b --label loop",
+            "gh pr checks 4 --watch",
+            "gh label list",
+            "gh search issues foo",
+        ):
+            self.assertFalse(self.denied(cmd), cmd)
+        for cmd in (
+            "gh secret set X",
+            "gh repo edit --visibility private",
+            "gh label edit accepted --name x",
+            "gh workflow disable ci",
+            "gh release create v9.9.9",
+            "GH_TOKEN=x gh repo delete o/r --yes",
+            "gh",
+        ):
+            self.assertTrue(self.denied(cmd), cmd)
+
+    def test_api_is_read_only(self):
+        self.assertFalse(self.denied("gh api --paginate repos/o/r/issues?state=open"))
+        self.assertFalse(self.denied("gh api -X GET search/issues -f q=x"))
+        for cmd in (
+            "gh api repos/o/r/issues/3/labels -f labels[]=accepted",
+            "gh api -XPATCH repos/o/r/issues/3",
+            "gh api --method=DELETE repos/o/r/labels/x",
+            "gh api repos/o/r/issues --input body.json",
+            "gh api graphql -F query=@q.graphql",
+        ):
+            self.assertTrue(self.denied(cmd), cmd)
+
+    def test_human_labels(self):
+        for cmd in (
+            "gh issue edit 3 --add-label accepted",
+            "gh issue edit 3 --add-label bug,approved",
+            "gh issue edit 3 --add-label=approved",
+            "gh issue create --title t --body b -l accepted",
+            "gh pr edit 4 --add-label approved",
+        ):
+            self.assertTrue(self.denied(cmd), cmd)
+        self.assertFalse(self.denied("gh issue edit 3 --add-label bug,needs-decision"))
+        self.assertFalse(self.denied("gh issue edit 3 --remove-label approved"))
+        self.assertFalse(self.denied("gh issue list -l accepted"))
+
+    def test_merge_runs_policy_with_checkout_config(self):
+        self.assertFalse(self.denied("gh pr merge -R o/r 7 --squash"))
+        args = self.policy_mock.call_args.args[0]
+        self.assertEqual(args[:3], ["7", "--repo", "o/r"])
+        self.assertEqual(args[3:], ["--config", str(git_guard.MAINTAIN_CONFIG)])
+
+        self.policy_mock.return_value = (1, "改到了护栏文件")
+        self.assertIn("护栏", check("gh pr merge 7 --squash", "/"))
+        self.assertTrue(self.denied("gh pr merge --squash"))  # PR must be named
 
 
 if __name__ == "__main__":

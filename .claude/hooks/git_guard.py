@@ -17,6 +17,12 @@ directory and environment of that shell; other heredoc bodies are data and are n
 checked. Shell comments are skipped and backslash-newline line continuations are joined.
 If the hook input cannot be read, the check itself fails, or a command (or shell-fed text)
 that mentions git/gh cannot be parsed, it is denied.
+
+Loop mode (JY_MAINTAIN_LOOP=1 in the hook's own environment, set by the launchd job of the
+jy-repo-maintain loop, docs/adr/0006): `gh pr merge` must name the PR and also pass
+`maintain.py check pr` (no guardrail files, no X bump) with the config of this checkout;
+only the gh commands in LOOP_GH run, `gh api` only as a GET; and the loop cannot put the
+labels by which a human accepts or approves an issue (`accept_label`, `approve_label`).
 """
 
 from __future__ import annotations
@@ -27,6 +33,7 @@ import re
 import shlex
 import subprocess
 import sys
+from pathlib import Path
 
 PROTECTED = "main"
 PUNCT = ";&|()"
@@ -91,6 +98,40 @@ GH_VALUE_OPTS = {
     "-R", "--repo", "-t", "--subject", "-b", "--body", "-F", "--body-file",
     "-A", "--author-email", "--match-head-commit",
 }  # fmt: skip
+
+# Loop mode (docs/adr/0006). The script and config come from the checkout this hook runs
+# from, never from the worktree of the PR being merged, so a PR cannot loosen its own check.
+PROJECT = Path(__file__).resolve().parents[2]
+MAINTAIN = PROJECT / "skills" / "jy-repo-maintain" / "scripts" / "maintain.py"
+MAINTAIN_CONFIG = PROJECT / ".claude" / "maintain.json"
+# gh commands the loop may run, per command its subcommands (None: any).
+LOOP_GH: dict[str, set[str] | None] = {
+    "issue": {"list", "view", "create", "comment", "edit", "close", "reopen", "status"},
+    "pr": {"list", "view", "create", "comment", "edit", "checks", "diff", "merge", "ready",
+           "close", "status"},
+    "run": {"list", "view", "watch"},
+    "repo": {"view"},
+    "label": {"list"},
+    "release": {"list", "view"},
+    "auth": {"status"},
+    "search": None,
+    "api": None,  # GET only, see api_method
+}  # fmt: skip
+LABEL_OPTS = {"--add-label", "--label", "-l"}
+API_FIELD_OPTS = {"-f", "-F", "--field", "--raw-field", "--input"}
+LOOP_GH_MSG = (
+    "The maintain loop may not run `gh {cmd}`: it only reads, comments, labels and "
+    "opens/merges PRs (see LOOP_GH in .claude/hooks/git_guard.py, docs/adr/0006). Note the "
+    "question in the maintain-log issue for a human instead."
+)
+LOOP_API_MSG = (
+    "The maintain loop may only read through `gh api` (GET, without -f/-F/--input). Use the "
+    "gh issue/pr subcommands to write (docs/adr/0006)."
+)
+LOOP_LABEL_MSG = (
+    "The maintain loop may not add the label(s) {labels}: only a human accepts or approves "
+    "an issue (docs/adr/0006). Ask in the issue and wait for the label."
+)
 
 
 REDIRECT_OPS = ("&>>", "&>", "<<<", "<<-", "<<", ">>", ">&", ">|", "<&", "<>", ">", "<")
@@ -518,6 +559,11 @@ def check_pr_merge(rest: list[str], cwd: str) -> str | None:
             selector = [a]
         i += 1
 
+    if loop_mode():
+        reason = loop_merge_policy(selector, repo, cwd)
+        if reason:
+            return reason
+
     code, output = pr_checks(selector + repo, cwd)
     if code == 0:
         return None
@@ -525,6 +571,104 @@ def check_pr_merge(rest: list[str], cwd: str) -> str | None:
         "Do not merge: the PR's CI checks have not all passed (gh pr checks exit "
         f"{code}). Wait for CI or fix it, then merge.\n{output[-1500:]}"
     )
+
+
+def loop_mode() -> bool:
+    return os.environ.get("JY_MAINTAIN_LOOP") == "1"
+
+
+def maintain_policy(args: list[str], cwd: str) -> tuple[int, str]:
+    """Run `maintain.py check pr <args>`; exit 0 means the loop may merge."""
+    try:
+        r = subprocess.run(
+            [sys.executable, str(MAINTAIN), "check", "pr", *args],
+            capture_output=True,
+            text=True,
+            timeout=60,
+            cwd=cwd,
+            env=clean_env(),
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as e:
+        return 1, f"could not run maintain.py: {e}"
+    return r.returncode, (r.stdout + r.stderr).strip()
+
+
+def loop_merge_policy(selector: list[str], repo: list[str], cwd: str) -> str | None:
+    if not selector:
+        return "In loop mode, name the PR: `gh pr merge <number> --squash` (docs/adr/0006)."
+
+    repo_args = ["--repo", repo[1]] if len(repo) == 2 else repo
+    args = [*selector, *repo_args, "--config", str(MAINTAIN_CONFIG)]
+    code, output = maintain_policy(args, cwd)
+    if code == 0:
+        return None
+    return (
+        "The maintain loop may not merge this PR by itself (docs/adr/0006); add the "
+        f"needs-human-merge label and note it in the maintain-log issue.\n{output[-1500:]}"
+    )
+
+
+def human_labels() -> set[str]:
+    try:
+        config = json.loads(MAINTAIN_CONFIG.read_text())
+    except (OSError, ValueError):
+        config = {}
+    return {config.get("accept_label", "accepted"), config.get("approve_label", "approved")}
+
+
+def label_values(args: list[str]) -> set[str]:
+    values, i = [], 0
+    while i < len(args):
+        a = args[i]
+        name, eq, val = a.partition("=")
+        if a in LABEL_OPTS and i + 1 < len(args):
+            values.append(args[i + 1])
+            i += 1
+        elif eq and name in LABEL_OPTS:
+            values.append(val)
+        i += 1
+    return {v.strip() for vs in values for v in vs.split(",")}
+
+
+def api_method(args: list[str]) -> str:
+    """The HTTP method `gh api` uses: -X/--method, else POST when fields are given."""
+    method, fields, i = None, False, 0
+    while i < len(args):
+        a = args[i]
+        if a in ("-X", "--method") and i + 1 < len(args):
+            method = args[i + 1]
+            i += 1
+        elif a.startswith("--method="):
+            method = a.split("=", 1)[1]
+        elif a.startswith("-X") and len(a) > 2:
+            method = a[2:]
+        elif (
+            a in API_FIELD_OPTS
+            or a.split("=", 1)[0] in API_FIELD_OPTS
+            or (a[:2] in ("-f", "-F") and len(a) > 2)
+        ):
+            fields = True
+        i += 1
+    return (method or ("POST" if fields else "GET")).upper()
+
+
+def check_gh_loop(seg: list[str]) -> str | None:
+    cmd = seg[1] if len(seg) > 1 else ""
+    sub = seg[2] if len(seg) > 2 else ""
+    allowed = LOOP_GH.get(cmd, set())
+    if cmd not in LOOP_GH or (allowed is not None and sub not in allowed):
+        return LOOP_GH_MSG.format(cmd=" ".join(seg[1:3]))
+
+    if cmd == "api":
+        rest = seg[2:]
+        graphql = any(a == "graphql" for a in rest if not a.startswith("-"))
+        return LOOP_API_MSG if graphql or api_method(rest) != "GET" else None
+
+    held = label_values(seg[3:]) & human_labels() if sub in ("create", "edit") else set()
+    if held:
+        return LOOP_LABEL_MSG.format(labels=", ".join(sorted(held)))
+    return None
 
 
 def check_git(seg: list[str], cwd: str, flags: set[str]) -> str | None:
@@ -626,6 +770,10 @@ def check(command: str, cwd: str, inherited: set[str] | None = None) -> str | No
             cwd = dirs.pop() if dirs else cwd
             continue
 
+        if seg[0] == "gh" and loop_mode():
+            reason = check_gh_loop(seg)
+            if reason:
+                return reason
         if seg[0] == "gh" and seg[1:3] == ["pr", "merge"]:
             reason = check_pr_merge(seg[3:], seg_cwd)
             if reason:

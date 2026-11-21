@@ -1,0 +1,41 @@
+name: 问题
+description: jy skill 的行为不对、脚本报错、文档和实际不符
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        外部提的 issue 要维护者打上 `accepted` 标签后，维护 loop 才会处理，进展会写在评论里。
+        在 Claude Code 里可以用 `/jy-skills-update` 回顾你项目里的使用记录，自动整理成这份表单的草稿。
+        不要贴你项目的私有代码、路径、token。
+  - type: dropdown
+    id: skill
+    attributes:
+      label: Skill
+      options: [jy-repo-review, jy-repo-quiz, jy-repo-constrain-check, jy-repo-codify, jy-repo-maintain, jy-skills-update, 不确定]
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: 版本
+      description: "`git -C .claude/jy-skills describe --tags` 的输出，或 VERSION 文件内容"
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: 发生了什么
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: 期望
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: 复现
+      description: 不依赖你项目的最小步骤

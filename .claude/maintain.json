@@ -1,0 +1,15 @@
+{
+  "require_accept_label": true,
+  "accept_label": "accepted",
+  "approve_label": "approved",
+  "log_label": "maintain-log",
+  "guardrails": [
+    ".claude/",
+    ".github/",
+    "scripts/",
+    ".pre-commit-config.yaml",
+    "ruff.toml",
+    "CLAUDE.md",
+    "skills/jy-repo-maintain/"
+  ]
+}

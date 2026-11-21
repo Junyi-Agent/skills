@@ -4,6 +4,13 @@
 
 每节分「不兼容」「新增」「修复」三类，没有的类别不写。「不兼容」里写清楚引用方要改什么。
 
+## 1.1.0 — 2026-11-21
+
+### 新增
+
+- `jy-repo-maintain`：按 issue 维护仓库的一轮 loop，配 `scripts/maintain.py`（`get issues`、`check pr`、`create schedule`）。用法和首次设置见 SKILL.md，本仓库的做法见 ADR 0006。
+- `jy-skills-update`：给引用本仓库的项目用。检查新版本，由子 agent 回顾本项目使用 jy skill 的会话（`scripts/history.py get invocations`），整理出 issue 草稿，用户确认后提交，再按 README 更新 submodule。
+
 ## 1.0.2 — 2026-11-21
 
 ### 修复
