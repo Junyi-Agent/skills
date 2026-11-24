@@ -433,6 +433,28 @@ class GitGuardTest(unittest.TestCase):
         self.assertFalse(self.denied("gh api repos/o/r/pulls/3", self.main))
 
 
+class MaintainScriptTest(unittest.TestCase):
+    """maintain.py is found in skills/ (this repo) or .claude/skills/ (a repo that copies
+    the hook and links the skills in)."""
+
+    def test_locations(self):
+        rel = Path("jy-repo-maintain") / "scripts" / "maintain.py"
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            self.assertEqual(git_guard.maintain_script(root), root / "skills" / rel)
+            linked = root / ".claude" / "skills" / rel
+            linked.parent.mkdir(parents=True)
+            linked.write_text("")
+            self.assertEqual(git_guard.maintain_script(root), linked)
+            own = root / "skills" / rel
+            own.parent.mkdir(parents=True)
+            own.write_text("")
+            self.assertEqual(git_guard.maintain_script(root), own)
+
+    def test_this_repo(self):
+        self.assertTrue(git_guard.maintain_script().is_file())
+
+
 class LoopModeTest(unittest.TestCase):
     """JY_MAINTAIN_LOOP=1: the rules for the jy-repo-maintain loop (docs/adr/0006)."""
 

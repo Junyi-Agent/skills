@@ -53,6 +53,8 @@ def adr_verification(text: str) -> str:
 def check_skills(root: Path) -> list[str]:
     problems = []
     skills_dir = root / "skills"
+    if not skills_dir.is_dir():  # a repo that copies this script has no skills of its own
+        return problems
     links_dir = root / ".claude" / "skills"
     readme = root / "README.md"
     readme_text = readme.read_text() if readme.is_file() else ""
