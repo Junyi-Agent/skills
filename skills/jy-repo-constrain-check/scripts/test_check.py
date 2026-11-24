@@ -318,6 +318,238 @@ class UnixTest(unittest.TestCase):
         self.assertIn("类型初判：不确定", facts(s))
 
 
+class DetectionVocabularyTest(unittest.TestCase):
+    """#26: swift format, swift/xcodebuild/gradle/mvn/dotnet/rspec tests, 不切分支."""
+
+    def test_swift_format_is_a_formatter(self):
+        for cmd in ("swift format lint --strict --recursive Sources", "swift-format lint -r ."):
+            s = fmt_lint({".githooks/pre-commit": f"#!/bin/sh\n{cmd}\nswiftlint lint --strict\n"})
+            self.assertNotIn("formatter：无", facts(s), cmd)
+            self.assertEqual(s.verdict, "JUDGE", cmd)
+
+    def test_more_test_commands(self):
+        for cmd in (
+            "swift test",
+            "xcodebuild test -scheme App",
+            "xcodebuild -scheme App -destination x test-without-building",
+            "./gradlew test",
+            "gradle check",
+            "mvn -B verify",
+            "dotnet test",
+            "bundle exec rspec",
+        ):
+            wf = f"on: [push, pull_request]\njobs:\n  t:\n    steps:\n      - run: {cmd}\n"
+            s = ci({".github/workflows/ci.yml": wf})
+            self.assertIn("测试：有", facts(s), cmd)
+
+    def test_short_form_of_not_switching_branches(self):
+        doc = "- 每个改动在仓库目录外的 worktree 里做（`git worktree add ../app-x`），不在主目录切分支。\n"
+        with Fixture({"AGENTS.md": doc}) as root:
+            s = check.check_worktree_doc(root)
+        self.assertIn("不改当前分支的信号 1 处", facts(s))
+
+
+class HookFilesTest(unittest.TestCase):
+    """#27: only files git runs are hooks; ignore_errors only weakens in a mypy config."""
+
+    def test_only_git_hook_names_are_installed_hooks(self):
+        with Fixture(
+            {
+                "hooks/pre-commit": "#!/bin/sh\n",
+                "hooks/pre-push": "#!/bin/sh\n",
+                "hooks/agent_guard.py": "#!/usr/bin/env python3\n",
+                "hooks/test_agent_guard.py": "#!/usr/bin/env python3\n",
+                "hooks/pre-commit.sample": "#!/bin/sh\n",
+            }
+        ) as root:
+            for f in (root / "hooks").iterdir():
+                f.chmod(0o755)
+            names = [h.name for h in check.installed_hooks(root / "hooks")]
+        self.assertEqual(names, ["pre-commit", "pre-push"])
+
+    def test_ignore_errors_in_code_is_not_a_weakening(self):
+        s = fmt_lint(
+            {
+                ".githooks/pre-commit": "#!/bin/sh\nblack --check . && ruff check --select ALL .\n",
+                ".githooks/test_guard.py": "import shutil\nshutil.rmtree(d, ignore_errors=True)\n",
+            }
+        )
+        self.assertFalse(any(e.startswith("放宽") for e in s.evidence), s.evidence)
+        self.assertEqual(s.verdict, "JUDGE")
+
+    def test_ignore_errors_in_mypy_config_is_a_weakening(self):
+        for name, text in (
+            ("mypy.ini", "[mypy]\nstrict = True\n[mypy-x.*]\nignore_errors = True\n"),
+            ("pyproject.toml", "[tool.mypy]\nstrict = true\nignore_errors = true\n"),
+        ):
+            s = fmt_lint(
+                {
+                    ".githooks/pre-commit": "#!/bin/sh\nblack --check . && mypy --strict .\n",
+                    name: text,
+                }
+            )
+            self.assertTrue(any(e.startswith("放宽") and name in e for e in s.evidence), name)
+            self.assertEqual(s.verdict, "WARN", name)
+
+
+SUBMODULE = "gitdir: ../.git/modules/x\n"
+
+
+class ScanScopeTest(unittest.TestCase):
+    """#28: skip submodules / nested repos and dependency dirs such as SwiftPM's .build."""
+
+    def test_adrs_in_submodule_are_not_counted(self):
+        with Fixture(
+            {
+                "docs/adr-0001-x.md": "---\nstatus: Accepted\n---\n# ADR-0001 x\n",
+                "tools/skills/.git": SUBMODULE,
+                "tools/skills/docs/adr/README.md": "| Verified | a human tested the code |\n",
+                "tools/skills/docs/adr/0001-y.md": "---\nstatus: Verified\n---\n# 0001 y\n",
+            }
+        ) as root:
+            s = check.check_adr(root)
+        self.assertIn("状态取值：`Accepted` ×1", facts(s))
+        self.assertNotIn("tools/skills", facts(s) + "\n".join(s.evidence))
+        self.assertIn("ADR 文件所在目录：docs", facts(s))
+
+    def test_dependency_and_submodule_scripts_are_skipped(self):
+        files = {"tools/skills/.git": SUBMODULE}
+        for d in (".build/checkouts/dep", "tools/skills", "Pods/X", "DerivedData/Y", ".gradle/z"):
+            files[f"{d}/scripts/s1"] = "#!/bin/sh\n# argparse\n"
+        s = unix(files)
+        self.assertIn("类型初判：不确定", facts(s))
+        self.assertIn("扫描了 0 个代码文件", facts(s))
+
+    def test_files_under_skips_nested_repo(self):
+        with Fixture(
+            {"tools/a.py": "x", "tools/skills/.git": SUBMODULE, "tools/skills/b.py": "x"}
+        ) as root:
+            names = [f.name for f in check.files_under(root / "tools")]
+        self.assertEqual(names, ["a.py"])
+
+
+class NativeAppTest(unittest.TestCase):
+    """#29: Xcode / SwiftUI / UIKit / Android / Flutter apps count as apps."""
+
+    def test_swiftui_app_with_scripts_is_mixed(self):
+        s = unix(
+            {
+                "App.xcodeproj/project.pbxproj": "// !$*UTF8*$!\n{ }\n",
+                "App/DemoApp.swift": (
+                    "import SwiftUI\n\n@main\nstruct DemoApp: App {\n"
+                    '    var body: some Scene { WindowGroup { Text("hi") } }\n}\n'
+                ),
+                "scripts/release.py": "#!/usr/bin/env python3\nimport argparse\n",
+            }
+        )
+        self.assertIn("类型初判：两类都有", facts(s))
+        self.assertTrue(any("App.xcodeproj" in e for e in s.evidence), s.evidence)
+
+    def test_native_app_signals(self):
+        for files in (
+            {"ios/App.xcworkspace/contents.xcworkspacedata": "<Workspace/>\n"},
+            {"Sources/main.swift": "UIApplicationMain(CommandLine.argc, nil, nil, nil)\n"},
+            {"Sources/AppDelegate.swift": "@NSApplicationMain\nclass AppDelegate {}\n"},
+            {"app/build.gradle.kts": 'plugins {\n    id("com.android.application")\n}\n'},
+            {"build.gradle": "apply plugin: 'com.android.application'\n"},
+            {"pubspec.yaml": "dependencies:\n  flutter:\n    sdk: flutter\n"},
+        ):
+            s = unix(files)
+            self.assertIn("类型初判：app 类", facts(s), files)
+
+
+LINT_ALL = """import subprocess, sys
+for cmd in (["black", "--check", "."], ["ruff", "check", "--select", "ALL", "."]):
+    if subprocess.run(cmd).returncode:
+        sys.exit(1)
+"""
+
+
+class HookCalledScriptTest(unittest.TestCase):
+    """#25: follow the repo scripts a hook calls one level deep."""
+
+    def test_follows_called_script(self):
+        for hook in (
+            '#!/bin/sh\nexec python3 "$(git rev-parse --show-toplevel)/scripts/lint_all.py"\n',
+            "#!/bin/sh\npython scripts/lint_all.py\n",
+            "#!/bin/sh\nuv run python scripts/lint_all.py --all\n",
+        ):
+            s = fmt_lint({".githooks/pre-commit": hook, "scripts/lint_all.py": LINT_ALL})
+            self.assertIn("formatter：black", facts(s), hook)
+            self.assertIn("linter：ruff", facts(s), hook)
+            self.assertEqual(s.verdict, "JUDGE", hook)
+            self.assertIn("scripts/lint_all.py", facts(s), hook)
+
+    def test_follows_precommit_entry_and_make(self):
+        s = fmt_lint(
+            {
+                ".pre-commit-config.yaml": (
+                    "repos:\n  - repo: local\n    hooks:\n      - id: lint\n"
+                    "        entry: bash scripts/lint.sh\n        language: system\n"
+                ),
+                "scripts/lint.sh": "#!/bin/sh\nmake lint\n",
+                "Makefile": "lint:\n\tshfmt -d .\n\tshellcheck --enable=all *.sh\n",
+            }
+        )
+        self.assertIn("formatter：shfmt", facts(s))
+        self.assertIn("linter：shellcheck", facts(s))
+        self.assertEqual(s.verdict, "JUDGE")
+
+    def test_no_follow_when_hooks_already_name_both(self):
+        hooks = PRECOMMIT.format(shellcheck_args="        args: [--enable=all]\n")
+        hooks += (
+            "  - repo: local\n    hooks:\n      - id: t\n        entry: python3 scripts/guard.py\n"
+        )
+        s = fmt_lint(
+            {
+                ".pre-commit-config.yaml": hooks,
+                "scripts/guard.py": 'MSG = "do not use SKIP= or black --exit-zero"\n',
+            }
+        )
+        self.assertEqual(s.verdict, "JUDGE")
+        self.assertNotIn("跟进了", facts(s))
+
+    def test_test_files_are_not_followed(self):
+        s = fmt_lint(
+            {
+                ".githooks/pre-commit": "#!/bin/sh\nruff check . && python3 tests/test_x.py\n",
+                "tests/test_x.py": 'CASES = ["black --check", "SKIP=x"]\n',
+            }
+        )
+        self.assertIn("formatter：无", facts(s))
+        self.assertEqual(s.verdict, "FAIL")
+
+    def test_missing_called_script_is_judge(self):
+        s = fmt_lint({".githooks/pre-commit": "#!/bin/sh\nexec python3 scripts/gone.py\n"})
+        self.assertEqual(s.verdict, "JUDGE")
+        self.assertTrue(any("scripts/gone.py" in j for j in s.judge), s.judge)
+
+
+class InstallStepTest(unittest.TestCase):
+    """#35: install steps in docs/ and in the pre-commit config count."""
+
+    def precommit(self, files: dict[str, str]) -> check.Section:
+        files = {".pre-commit-config.yaml": "repos: []\n", **files}
+        with Fixture(files) as root:
+            hook = root / ".git" / "hooks" / "pre-commit"
+            hook.write_text("#!/bin/sh\n")
+            hook.chmod(0o755)
+            return check.check_git_precommit(root, [hook])
+
+    def test_install_step_locations(self):
+        for files in (
+            {"docs/development.md": "uv sync\nuv run pre-commit install\n"},
+            {"docs/CONTRIBUTING.md": "pre-commit install\n"},
+            {".pre-commit-config.yaml": "# Install once: uv run pre-commit install\nrepos: []\n"},
+        ):
+            s = self.precommit(files)
+            self.assertEqual(s.verdict, "PASS", files)
+
+    def test_no_install_step_warns(self):
+        s = self.precommit({"docs/development.md": "uv sync\n"})
+        self.assertEqual(s.verdict, "WARN")
+
+
 class FilesUnderTest(unittest.TestCase):
     def test_skips_pycache_and_pyc(self):
         with Fixture(

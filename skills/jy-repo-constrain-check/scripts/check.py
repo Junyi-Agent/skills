@@ -39,6 +39,10 @@ SKIP_DIRS = {
     ".mypy_cache",
     ".ruff_cache",
     ".next",
+    ".build",  # SwiftPM checkouts and build products
+    "DerivedData",
+    "Pods",
+    ".gradle",
 }
 MAX_DEPTH = 4
 MAX_FILE = 200_000
@@ -47,11 +51,17 @@ MAX_FILE = 200_000
 # ---------- helpers ----------
 
 
+def skip_dir(d: Path, name: str) -> bool:
+    """SKIP_DIRS, eval workspaces, and other repos inside this one (submodules, nested clones):
+    their root has a `.git` file or directory."""
+    return name in SKIP_DIRS or name.endswith("-workspace") or (d / name / ".git").exists()
+
+
 def walk(root: Path, max_depth: int = MAX_DEPTH):
     root_depth = len(root.parts)
     for dirpath, dirnames, filenames in os.walk(root):
         d = Path(dirpath)
-        dirnames[:] = [n for n in dirnames if n not in SKIP_DIRS and not n.endswith("-workspace")]
+        dirnames[:] = [n for n in dirnames if not skip_dir(d, n)]
         if len(d.parts) - root_depth >= max_depth:
             dirnames[:] = []
         for f in filenames:
@@ -59,14 +69,8 @@ def walk(root: Path, max_depth: int = MAX_DEPTH):
 
 
 def files_under(d: Path) -> list[Path]:
-    """Files below d, skipping SKIP_DIRS (e.g. __pycache__) and compiled .pyc files."""
-    return [
-        f
-        for f in d.rglob("*")
-        if f.is_file()
-        and f.suffix != ".pyc"
-        and not SKIP_DIRS.intersection(f.relative_to(d).parts[:-1])
-    ]
+    """Files below d, skipping what walk() skips and compiled .pyc files."""
+    return sorted(f for f in walk(d, max_depth=99) if f.suffix != ".pyc" and f.is_file())
 
 
 def read(p: Path) -> str:
@@ -198,9 +202,12 @@ def check_adr(root: Path) -> Section:
 
     docs = [p for p in adr_files if is_adr_doc(p)]
     meta = [p for p in adr_files if p not in docs]
-    s.facts.append(
-        f"ADR 目录：{', '.join(sorted(rel(root, d) for d in adr_dirs)) or '无（散落文件）'}；ADR {len(docs)} 篇，说明/模板 {len(meta)} 个"
-    )
+    if adr_dirs:
+        where = "ADR 目录：" + ", ".join(sorted(rel(root, d) for d in adr_dirs))
+    else:
+        parents = sorted({rel(root, p.parent) for p in adr_files})
+        where = "ADR 目录：无，ADR 文件所在目录：" + ", ".join(parents)
+    s.facts.append(f"{where}；ADR {len(docs)} 篇，说明/模板 {len(meta)} 个")
 
     statuses: dict[str, list[str]] = {}
     no_status = []
@@ -260,13 +267,47 @@ def hooks_dir(root: Path) -> Path | None:
     return (p if p.is_absolute() else root / p) / "hooks"
 
 
+# git runs only files named after a hook (githooks(5)); other files in the hooks directory,
+# such as Claude Code hook scripts and their tests, are not git hooks.
+GIT_HOOK_NAMES = {
+    "applypatch-msg",
+    "pre-applypatch",
+    "post-applypatch",
+    "pre-commit",
+    "pre-merge-commit",
+    "prepare-commit-msg",
+    "commit-msg",
+    "post-commit",
+    "pre-rebase",
+    "post-checkout",
+    "post-merge",
+    "pre-push",
+    "pre-receive",
+    "update",
+    "proc-receive",
+    "post-receive",
+    "post-update",
+    "reference-transaction",
+    "push-to-checkout",
+    "pre-auto-gc",
+    "post-rewrite",
+    "sendemail-validate",
+    "fsmonitor-watchman",
+    "p4-changelist",
+    "p4-prepare-changelist",
+    "p4-post-changelist",
+    "p4-pre-submit",
+    "post-index-change",
+}
+
+
 def installed_hooks(hd: Path | None) -> list[Path]:
     if not hd or not hd.is_dir():
         return []
     return sorted(
         p
         for p in hd.iterdir()
-        if p.is_file() and not p.name.endswith(".sample") and os.access(p, os.X_OK)
+        if p.name in GIT_HOOK_NAMES and p.is_file() and os.access(p, os.X_OK)
     )
 
 
@@ -315,20 +356,16 @@ def check_git_precommit(root: Path, hooks: list[Path]) -> Section:
     if hp:
         s.facts.append(f"core.hooksPath = `{hp}`")
     names = [h.name for h in hooks]
-    s.facts.append(f"已安装（可执行、非 .sample）的 hook：{', '.join(names) if names else '无'}")
+    s.facts.append(
+        f"已安装（可执行、按 git hook 命名）的 hook：{', '.join(names) if names else '无'}"
+    )
 
     install_refs = []
-    for name in [
-        "README.md",
-        "CONTRIBUTING.md",
-        "Makefile",
-        "justfile",
-        "package.json",
-        "CLAUDE.md",
-        "AGENTS.md",
-    ]:
-        p = root / name
-        if p.exists():
+    docs = [*DOCS, "Makefile", "justfile", "package.json", ".pre-commit-config.yaml"]
+    docs += [".pre-commit-config.yml"]
+    places = [root / n for n in docs] + sorted((root / "docs").glob("*.md"))
+    for p in dict.fromkeys(places):
+        if p.is_file():
             install_refs += grep(root, p, INSTALL_STEP, limit=2)
     for p in (root / "scripts").glob("*") if (root / "scripts").is_dir() else []:
         if p.is_file():
@@ -354,7 +391,7 @@ def check_git_precommit(root: Path, hooks: list[Path]) -> Section:
 
 FORMATTERS = re.compile(
     r"(?i)\b(black|ruff-format|ruff format|isort|autopep8|yapf|prettier|biome[- ]format|"
-    r"gofmt|goimports|gofumpt|rustfmt|cargo fmt|clang-format|shfmt|stylua|ktlint|swiftformat|"
+    r"gofmt|goimports|gofumpt|rustfmt|cargo fmt|clang-format|shfmt|stylua|ktlint|swiftformat|swift[- ]format|"
     r"terraform fmt|taplo|end-of-file-fixer|trailing-whitespace)\b"
 )
 LINTERS = re.compile(
@@ -366,7 +403,7 @@ LINTERS = re.compile(
 # listed: `style` is its default and every other level reports less.
 STRICT = re.compile(
     r"(?i)--strict|strict\s*=\s*true|typeCheckingMode\s*[:=]\s*\"?strict|"
-    r"^\s*(extend-)?select\s*=\s*\[|--enable[= ]all|(^|\s)-o\s*all\b|"
+    r"^\s*(extend-)?select\s*=\s*\[|--select[\"']?(?:[= ]|,\s*)[\"']?ALL\b|--enable[= ]all|(^|\s)-o\s*all\b|"
     r"--max-warnings[= ]0|-D\s*warnings|--deny[= ]warnings|"
     r"disallow_untyped_defs|warn_unused_ignores|--exit-non-zero-on-fix|\"strict\"\s*:\s*true|"
     r"--fail-on|--error|"
@@ -377,8 +414,11 @@ STRICT = re.compile(
 WEAK = re.compile(
     r"(?i)--exit-zero|(pre-commit|lint|ruff|eslint|flake8|mypy|pyright|pylint|clippy|golangci|"
     r"shellcheck|pytest|test)[^|\n]*\|\|\s*true|continue-on-error:\s*true|--max-warnings[= ]-1|"
-    r"--disable-error-code|ignore_errors\s*=\s*true|SKIP="
+    r"--disable-error-code|SKIP="
 )
+# mypy's `ignore_errors = true` only weakens in a mypy config; in code it is shutil.rmtree's flag
+MYPY_CONFIGS = {"mypy.ini", ".mypy.ini", "setup.cfg", "pyproject.toml"}
+MYPY_WEAK = re.compile(r"(?i)^\s*ignore_errors\s*=\s*true")
 LINT_CONFIGS = [
     "pyproject.toml",
     "ruff.toml",
@@ -420,10 +460,64 @@ def hook_texts(root: Path, hooks: list[Path]) -> list[Path]:
     return files
 
 
+# Repo files a hook runs, so checks kept in `scripts/lint.py` or a Makefile are seen too.
+TOPLEVEL = re.compile(r"\$\(git rev-parse --show-toplevel\)/")
+INTERP_CALL = re.compile(
+    r"(?:^|[\s;&|(`\"'])(?:(?:uv|poetry|pipenv|pdm|hatch)\s+run\s+)?"
+    r"(?:(?:exec|python[\d.]*|sh|bash|zsh|node|ruby|perl)\s+)+(?:-[\w-]+\s+)*[\"']?"
+    r"(\.?/?[\w.-]+(?:/[\w.-]+)*)"
+)
+BARE_PATH = re.compile(
+    r"(?:^|[\s;&|(:\"'])(\.?/?(?:[\w.-]+/)+[\w.-]+\.(?:py|sh|bash|zsh|js|mjs|cjs|ts|rb|pl))\b"
+)
+TASK_CALL = re.compile(r"(?:^|[\s;&|(\"'])(make|just|npm run|pnpm run|yarn run|task)\b")
+TASK_FILES = {
+    "make": "Makefile",
+    "just": "justfile",
+    "npm run": "package.json",
+    "pnpm run": "package.json",
+    "yarn run": "package.json",
+    "task": "Taskfile.yml",
+}
+
+
+def called_files(root: Path, files: list[Path], depth: int = 2) -> tuple[list[Path], list[str]]:
+    """Repo files that `files` run (followed `depth` levels), and called paths that are missing."""
+    top = root.resolve()
+    seen = {f.resolve() for f in files}
+    found, missing, frontier = [], [], list(files)
+    for _ in range(depth):
+        nxt = []
+        for f in frontier:
+            text = TOPLEVEL.sub("", read(f))
+            calls = [(m.group(1), True) for m in INTERP_CALL.finditer(text)]
+            calls += [(m.group(1), False) for m in BARE_PATH.finditer(text)]
+            calls += [(TASK_FILES[m.group(1)], False) for m in TASK_CALL.finditer(text)]
+            for c, is_call in calls:
+                p = (root / c.removeprefix("./")).resolve()
+                if TEST_FILE.search(p.name):  # a hook running unit tests is not a lint runner
+                    continue
+                if p.is_file() and p.is_relative_to(top):
+                    if p not in seen:
+                        seen.add(p)
+                        found.append(root / p.relative_to(top))
+                        nxt.append(found[-1])
+                elif is_call and "/" in c and not p.exists():
+                    missing.append(c)
+        frontier = nxt
+    return found, list(dict.fromkeys(missing))
+
+
 def check_fmt_lint(root: Path, hooks: list[Path]) -> Section:
     s = Section(3, "pre-commit 做 formatter + 严格 linter")
     files = hook_texts(root, hooks)
     text = "\n".join(read(f) for f in files)
+    called, missing = [], []
+    if not (FORMATTERS.search(text) and LINTERS.search(text)):
+        # Only when the hooks alone lack one: followed scripts hold tool names as data too.
+        called, missing = called_files(root, files)
+        files += called
+        text += "\n" + "\n".join(read(f) for f in called)
     if not text.strip():
         s.facts.append("没有任何 hook 配置或已安装的 hook")
         return s
@@ -434,14 +528,27 @@ def check_fmt_lint(root: Path, hooks: list[Path]) -> Section:
     lints = sorted({m.group(1).lower() for m in LINTERS.finditer(text)})
     s.facts.append(f"formatter：{', '.join(fmts) or '无'}")
     s.facts.append(f"linter：{', '.join(lints) or '无'}")
+    if called:
+        s.facts.append("跟进了 hook 调用的文件：" + ", ".join(rel(root, f) for f in called))
+        for f in called:
+            hits = grep(root, f, FORMATTERS, limit=2) + grep(root, f, LINTERS, limit=2)
+            s.evidence += [f"调用：{e}" for e in hits]
 
     strict, weak = [], []
     for f in files + [root / c for c in LINT_CONFIGS if (root / c).is_file()]:
         strict += grep(root, f, STRICT, limit=4)
         weak += grep(root, f, WEAK, limit=4)
+        if f.parent == root and f.name in MYPY_CONFIGS:
+            weak += grep(root, f, MYPY_WEAK, limit=4)
     s.evidence += [f"严格：{e}" for e in strict[:6]] + [f"放宽：{e}" for e in weak[:6]]
 
-    if not fmts or not lints:
+    if (not fmts or not lints) and missing:
+        s.verdict = "JUDGE"
+        s.judge.append(
+            f"hook 调用了 {', '.join(f'`{m}`' for m in missing)}，脚本在 repo 里找不到，"
+            "请读 hook 判断 formatter / linter 在哪里跑"
+        )
+    elif not fmts or not lints:
         s.verdict = "FAIL"
     elif weak:
         s.verdict = "WARN"
@@ -544,7 +651,7 @@ OUTSIDE = re.compile(
     r"\.\./|~/|/tmp|outside|sibling|当前目录之外|仓库之外|repo 之外|上级目录|外部目录", re.I
 )
 KEEP_BRANCH = re.compile(
-    r"(?i)不.{0,6}(切换|checkout|switch|影响).{0,12}(分支|branch)|"
+    r"(?i)不.{0,6}(切换?|checkout|switch|影响).{0,12}(分支|branch)|"
     r"(do not|don't|never|must not).{0,20}(checkout|switch|change).{0,20}branch|"
     r"(分支|branch).{0,12}不.{0,4}(变|动|受影响)"
 )
@@ -706,7 +813,9 @@ CI_LINT = re.compile(
     r"(?i)pre-commit run|pre-commit/action|\blint\b|ruff|eslint|flake8|mypy|pyright|clippy|golangci|shellcheck|biome|fmt --check|--check\b"
 )
 CI_TEST = re.compile(
-    r"(?i)pytest|unittest|\btest_\w+\.py\b|\w+_test\.py\b|\b(npm|pnpm|yarn|bun) (run )?test|cargo test|go test|\bmake test|ctest|jest|vitest|tox\b|nox\b"
+    r"(?i)pytest|unittest|\btest_\w+\.py\b|\w+_test\.py\b|\b(npm|pnpm|yarn|bun) (run )?test|cargo test|go test|\bmake test|ctest|jest|vitest|tox\b|nox\b|"
+    r"\bswift test\b|\bxcodebuild\b.*\btest(-without-building)?\b|\bgradlew?\b.*\b(test|check)\b|"
+    r"\bmvn\b.*\b(test|verify)\b|\bdotnet test\b|\brspec\b"
 )
 CI_DEPLOY = re.compile(
     r"(?i)deploy|release|publish|docker push|gh release|twine upload|npm publish|helm upgrade|kubectl apply"
@@ -900,6 +1009,7 @@ LIB_DECL = [
     ("Cargo.toml", r"(?m)^\[lib\]"),
     ("go.mod", r"(?m)^module\s"),
 ]
+ANDROID_GRADLE = ["build.gradle", "build.gradle.kts", "app/build.gradle", "app/build.gradle.kts"]
 # (file, pattern): a user-facing app or long-running service
 APP_DECL = [
     (
@@ -912,14 +1022,19 @@ APP_DECL = [
     ("Gemfile", r"\brails\b"),
     ("Dockerfile", r"(?m)^\s*EXPOSE\s"),
     ("Procfile", r"(?m)^web:"),
+    *[(f, r"com\.android\.application") for f in ANDROID_GRADLE],
+    ("pubspec.yaml", r"(?m)^\s*sdk:\s*flutter\b"),
 ]
 APP_PATHS = ["android", "ios", "public/index.html", "src/components", "src/pages", "app/views"]
+# Xcode projects at the top level or one level down (Pods/ etc. are skipped)
+APP_GLOBS = ["*.xcodeproj", "*.xcworkspace", "*/*.xcodeproj", "*/*.xcworkspace"]
 CLI_CODE = re.compile(
     r"\bargparse\b|\bimport click\b|\bfrom click\b|\btyper\b|\bclap::|cobra\.Command|"
     r"\bflag\.Parse\(|\bcommander\b|\byargs\b|\bOptionParser\b|\bgetopts\b"
 )
 APP_CODE = re.compile(
-    r"\bFlask\(|\bFastAPI\(|\bapp\.listen\(|http\.ListenAndServe|createRoot\(|ReactDOM\.render"
+    r"\bFlask\(|\bFastAPI\(|\bapp\.listen\(|http\.ListenAndServe|createRoot\(|ReactDOM\.render|"
+    r"\bstruct\s+\w+\s*:\s*App\b|\bUIApplicationMain\b|\bNSApplicationMain\b"  # SwiftUI, UIKit, AppKit
 )
 UNIX_SIGNALS = [
     ("读 stdin", re.compile(r"sys\.stdin|process\.stdin|os\.Stdin|io::stdin|\bfileinput\b|\bread -r\b")),
@@ -983,6 +1098,12 @@ def check_unix(root: Path) -> Section:
     lib = decl_hits(root, LIB_DECL)
     app = decl_hits(root, APP_DECL)
     app += [f"`{p}` 存在" for p in APP_PATHS if (root / p).exists()]
+    app += [
+        f"`{rel(root, p)}` 存在"
+        for g in APP_GLOBS
+        for p in sorted(root.glob(g))
+        if p.is_dir() and not SKIP_DIRS.intersection(p.relative_to(root).parts)
+    ]
     scripts = [f for f in code if read(f).startswith("#!")]
     cli_code, app_code = [], []
     for f in code:
