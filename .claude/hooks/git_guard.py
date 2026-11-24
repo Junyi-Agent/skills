@@ -102,7 +102,6 @@ GH_VALUE_OPTS = {
 # Loop mode (docs/adr/0006). The script and config come from the checkout this hook runs
 # from, never from the worktree of the PR being merged, so a PR cannot loosen its own check.
 PROJECT = Path(__file__).resolve().parents[2]
-MAINTAIN = PROJECT / "skills" / "jy-repo-maintain" / "scripts" / "maintain.py"
 MAINTAIN_CONFIG = PROJECT / ".claude" / "maintain.json"
 # gh commands the loop may run, per command its subcommands (None: any).
 LOOP_GH: dict[str, set[str] | None] = {
@@ -577,11 +576,19 @@ def loop_mode() -> bool:
     return os.environ.get("JY_MAINTAIN_LOOP") == "1"
 
 
+def maintain_script(project: Path = PROJECT) -> Path:
+    """maintain.py of the checkout: skills/ in this repo; .claude/skills/ (symlinks into a
+    submodule) in a repo that copies this hook unchanged. A missing script fails the check."""
+    rel = Path("jy-repo-maintain") / "scripts" / "maintain.py"
+    candidates = [project / "skills" / rel, project / ".claude" / "skills" / rel]
+    return next((p for p in candidates if p.is_file()), candidates[0])
+
+
 def maintain_policy(args: list[str], cwd: str) -> tuple[int, str]:
     """Run `maintain.py check pr <args>`; exit 0 means the loop may merge."""
     try:
         r = subprocess.run(
-            [sys.executable, str(MAINTAIN), "check", "pr", *args],
+            [sys.executable, str(maintain_script()), "check", "pr", *args],
             capture_output=True,
             text=True,
             timeout=60,

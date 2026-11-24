@@ -57,6 +57,11 @@ class SkillsTest(unittest.TestCase):
     def tearDown(self):
         self.t.tmp.cleanup()
 
+    def test_no_skills_directory(self):
+        """A repo that copies this script (and links the skills in from a submodule)."""
+        (self.t.root / ".claude" / "skills" / "jy-a").symlink_to("../jy-skills/skills/jy-a")
+        self.assertEqual(check_skills(self.t.root), [])
+
     def test_consistent(self):
         self.t.skill("jy-a")
         self.t.skill("jy-b")

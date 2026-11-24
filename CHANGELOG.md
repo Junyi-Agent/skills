@@ -4,6 +4,18 @@
 
 每节分「不兼容」「新增」「修复」三类，没有的类别不写。「不兼容」里写清楚引用方要改什么。
 
+## 1.2.0 — 2026-11-24
+
+### 新增
+
+别的仓库可以原样复制本仓库的 hook 和脚本，本地差异放进配置，同步上游时整文件替换：
+
+- `scripts/review_gate.py`：仓库里有 `.claude/review_gate.json`（`{"reviewers": {名字: 审查方向}}`，正好 3 个不同的方向）时用它代替内置的 3 个审查方向。文件从 merge-base 读，push 改不了审查自己的 reviewer；格式不对时阻止 push。
+- `.claude/hooks/git_guard.py`：loop 模式在 `skills/` 或 `.claude/skills/` 下找 `jy-repo-maintain/scripts/maintain.py`，引用方用 submodule 加软链接时也能找到。
+- `scripts/repo_check.py`：没有 `skills/` 目录的仓库，`check skills` 不报问题。
+
+本仓库自己的行为不变。
+
 ## 1.1.0 — 2026-11-21
 
 ### 新增

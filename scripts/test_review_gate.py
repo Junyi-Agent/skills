@@ -156,8 +156,11 @@ class MainTest(unittest.TestCase):
         self.votes = [True, True, True]
         self.orig = review_gate.run_reviewer
 
+        self.focuses: dict[str, str] = {}
+
         def fake(name, focus, ctx, root):
             self.calls.append(ctx)
+            self.focuses[name] = focus
             return Verdict(name, self.votes[len(self.calls) - 1], "s")
 
         review_gate.run_reviewer = fake
@@ -214,6 +217,45 @@ class MainTest(unittest.TestCase):
         commit(self.repo, "feature.txt", "new\n")
         self.votes = [True, False, False]
         self.assertEqual(self.run_main(), 1)
+
+    def write_config(self, reviewers: object) -> None:
+        path = self.repo / ".claude" / "review_gate.json"
+        path.parent.mkdir(exist_ok=True)
+        path.write_text(json.dumps({"reviewers": reviewers}))
+
+    def config_on_main(self, reviewers: object) -> None:
+        sh(self.repo, "switch", "-q", "main")
+        self.write_config(reviewers)
+        sh(self.repo, "add", ".claude")
+        sh(self.repo, "commit", "-q", "-m", "config")
+        sh(self.repo, "push", "-q", "origin", "main")
+        sh(self.repo, "switch", "-q", "feature")
+        sh(self.repo, "rebase", "-q", "main")
+
+    def test_reviewers_from_the_config_on_main(self):
+        mine = {"a": "focus a", "b": "focus b", "c": "focus c"}
+        self.config_on_main(mine)
+        commit(self.repo, "feature.txt", "new\n")
+        self.assertEqual(self.run_main(), 0)
+        self.assertEqual(self.focuses, mine)
+
+    def test_a_push_cannot_choose_its_own_reviewers(self):
+        self.write_config({"a": "x", "b": "y", "c": "z"})
+        sh(self.repo, "add", ".claude")
+        commit(self.repo, "feature.txt", "new\n")
+        self.assertEqual(self.run_main(), 0)
+        self.assertEqual(self.focuses, REVIEWERS)
+
+    def test_a_bad_config_blocks(self):
+        for bad in ({"a": "x", "b": "y"}, {"a": "x", "b": "x", "c": "z"}, ["a", "b", "c"]):
+            self.config_on_main(bad)
+            commit(self.repo, "feature.txt", f"new {bad!r}\n")
+            self.calls.clear()
+            err = io.StringIO()
+            with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(err):
+                self.assertEqual(review_gate.main(), 1, bad)
+            self.assertIn("review_gate.json", err.getvalue())
+            self.assertEqual(self.calls, [])
 
     def test_missing_base_ref_blocks_with_message(self):
         commit(self.repo, "feature.txt", "new\n")

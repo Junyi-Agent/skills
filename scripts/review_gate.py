@@ -7,6 +7,11 @@ or returns unparseable output counts as a rejection. Installed by `pre-commit in
 
 Reviewed range: merge-base(origin/main, pushed ref)..pushed ref, i.e. everything the
 feature branch (or its squash-merged result) adds on top of main.
+
+The three focuses are REVIEWERS unless the repo has `.claude/review_gate.json`
+({"reviewers": {name: focus, ...}}, exactly three different focuses). The file is read from
+the merge-base, not from the pushed commits, so a push cannot choose its own reviewers.
+Other repos copy this script unchanged and keep their focuses in that file.
 """
 
 from __future__ import annotations
@@ -49,6 +54,8 @@ SCHEMA = {
     },
     "required": ["approve", "summary", "blocking_issues"],
 }
+
+CONFIG = ".claude/review_gate.json"
 
 REVIEWERS: dict[str, str] = {
     "correctness": (
@@ -163,6 +170,31 @@ def failure_detail(r: subprocess.CompletedProcess[str]) -> str:
     return (detail or r.stdout.strip() or "no output")[:300]
 
 
+def load_reviewers(root: Path, base: str) -> dict[str, str]:
+    """The reviewers in CONFIG at commit `base`, or REVIEWERS when it has no such file.
+    Raises ValueError for a file that is not three named, different focuses."""
+    try:
+        text = git(root, "show", f"{base}:{CONFIG}")
+    except subprocess.CalledProcessError:
+        return REVIEWERS
+
+    try:
+        data = json.loads(text)
+    except ValueError as e:
+        raise ValueError(f"{CONFIG} is not valid JSON ({e})") from e
+    reviewers = data.get("reviewers") if isinstance(data, dict) else None
+    ok = (
+        isinstance(reviewers, dict)
+        and len(reviewers) == 3
+        and all(isinstance(k, str) and k for k in reviewers)
+        and all(isinstance(v, str) and v.strip() for v in reviewers.values())
+        and len(set(reviewers.values())) == 3
+    )
+    if not ok:
+        raise ValueError(f'{CONFIG}: "reviewers" must map 3 names to 3 different focus texts')
+    return dict(reviewers)
+
+
 def decide(verdicts: list[Verdict]) -> bool:
     return sum(v.approve for v in verdicts) >= REQUIRED_APPROVALS
 
@@ -184,6 +216,12 @@ def main() -> int:
         )
         return 1
 
+    try:
+        reviewers = load_reviewers(root, base)
+    except ValueError as e:
+        print(f"review gate: {e}; the push is blocked until it is fixed.", file=sys.stderr)
+        return 1
+
     diff = git(root, "diff", f"{base}..{head}")
     if not diff.strip():
         print("review gate: nothing to review")
@@ -200,13 +238,13 @@ def main() -> int:
     }
 
     print(
-        f"review gate: {len(REVIEWERS)} reviewers on {base[:12]}..{head}",
+        f"review gate: {len(reviewers)} reviewers on {base[:12]}..{head}",
         file=sys.stderr,
         flush=True,
     )
-    with ThreadPoolExecutor(len(REVIEWERS)) as pool:
+    with ThreadPoolExecutor(len(reviewers)) as pool:
         futures = [
-            pool.submit(run_reviewer, name, focus, ctx, root) for name, focus in REVIEWERS.items()
+            pool.submit(run_reviewer, name, focus, ctx, root) for name, focus in reviewers.items()
         ]
         verdicts = [f.result() for f in futures]
 
