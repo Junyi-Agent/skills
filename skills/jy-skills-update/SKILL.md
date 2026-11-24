@@ -13,7 +13,8 @@ description: "检查并更新当前项目引用的 jy skills（Junyi-Agent/skill
 
 - 在项目根目录执行 `git config -f .gitmodules --get-regexp 'submodule\..*\.url'`，找 url 含 `Junyi-Agent/skills` 的那一项，取它的 path（README 推荐的是 `.claude/jy-skills`）。
 - 当前版本：`git -C <path> describe --tags`；没有 tag 时读 `<path>/VERSION`，并说明锁的是某个提交。
-- 找不到 submodule（skill 是复制进来的，或装在 `~/.claude/skills`）：告诉用户这种装法没法自动更新，只做下面的回顾和反馈；要更新可以改用 README「安装到项目」一节的 submodule 方式。
+- 找不到 submodule：看 `.claude/skills/jy-*` 和 `~/.claude/skills/jy-*` 是不是软链接。是的话用 `realpath` 解析出目标，`git -C <目标> rev-parse --show-toplevel` 得到 clone 的根目录，`git -C <clone> remote get-url origin` 含 `Junyi-Agent/skills` 时，把这个 clone 当作安装位置（下文的 `<path>`），照常查版本。另外记下链接放在哪个目录（`<链接目录>`）、链接是不是被项目 gitignore。
+- 都不是（skill 目录是复制进来的）：告诉用户这种装法没法自动更新，只做下面的回顾和反馈；要更新可以改用 README「安装到项目」一节的 submodule 或 clone 方式。
 
 ## 2. 交给子 agent
 
@@ -23,9 +24,9 @@ Claude Code 里用 Agent 工具起一个全新的 general-purpose agent（不要
 
 ```text
 你在帮用户检查项目 <项目根目录> 引用的 jy skills（GitHub 仓库 Junyi-Agent/skills）。
-安装位置：<submodule path，没有就写“无，只做反馈”>；当前版本：<版本>。
+安装位置：<submodule 或 clone 的路径，没有就写“无，只做反馈”>；当前版本：<版本>。
 草稿目录：<scratch 目录>。只能在草稿目录里写文件；不要提 issue，不要改项目里的任何文件，
-不要 checkout 或更新 submodule。
+不要 checkout、pull 或以其他方式更新安装位置。
 
 1. 新版本：git -C <path> fetch --tags -q，列出比当前版本新的 vX.Y.Z tag。用
    git -C <path> show <最新 tag>:CHANGELOG.md 读 CHANGELOG，摘出当前版本之后到最新版本
@@ -84,6 +85,20 @@ find .claude/skills -maxdepth 1 -type l -lname '../<同上>/*' ! -exec test -e {
 - 有「不兼容」项的，按 CHANGELOG 说的改完用户项目里受影响的地方。
 - `git add` 和 commit 之前先问用户。遵守用户项目自己的规则：要求在 worktree 或 feature 分支上改、要求开 PR 的，照做。commit message 可以用 `Update jy skills to vX.Y.Z`。
 - 提醒用户：同事拉到这个提交后要执行 `git submodule update` 才会切到新版本。
+
+装法是软链接到本机 clone 时，照 README「更新」一节的 clone 写法做：
+
+```bash
+git -C <clone> fetch --tags
+git -C <clone> pull --ff-only          # clone 停在 main 上：升到最新版本
+for d in <clone>/skills/jy-*/; do ln -sfn "${d%/}" "<链接目录>/$(basename "$d")"; done
+find <链接目录> -maxdepth 1 -type l -lname '<clone>/*' ! -exec test -e {} \; -print -delete
+```
+
+- 要锁到某个 tag 时用 `git -C <clone> checkout vX.Y.Z`。项目装了 `git_guard.py` 的话，它会把这一步当作切分支拒绝（clone 不是 submodule），请用户自己在终端执行，Claude Code 里可以输入 `! git -C <clone> checkout vX.Y.Z`。
+- clone 有未提交的改动，或停在 main 以外的分支上（用户在里面开发）时，不要动它，告诉用户情况，让用户决定。
+- 先提醒用户：这个 clone 被多个项目或 `~/.claude/skills` 共用时，更新会同时影响所有用它的地方。
+- 只删指向这个 clone 的悬空链接。链接被 gitignore 时项目里没有要提交的东西；没被 ignore 时按上面 submodule 的规则问用户再提交。
 
 ## 6. 报告
 

@@ -32,6 +32,14 @@ git commit -m "Add jy skills v1.0.0"
 
 同事 clone 时加 `--recurse-submodules`；已经 clone 的，执行 `git submodule update --init`。
 
+也可以不用 submodule，把各 skill 软链接到本机的一个 clone。适合一个 clone 在多个项目里共用，或者链进 `~/.claude/skills` 全局使用：
+
+```bash
+git clone https://github.com/Junyi-Agent/skills.git ~/src/skills
+mkdir -p .claude/skills
+for d in ~/src/skills/skills/jy-*/; do ln -sfn "${d%/}" ".claude/skills/$(basename "$d")"; done
+```
+
 ## 更新
 
 先读 [`CHANGELOG.md`](CHANGELOG.md) 里新版本的「不兼容」一节，再执行：
@@ -47,6 +55,14 @@ git commit -m "Update jy skills to v1.1.0"
 ```
 
 同事拉到这个提交后执行 `git submodule update` 才会切到新版本。
+
+软链接到本机 clone 的，在 clone 里拉新版本，再补链接、删悬空链接。clone 更新后，所有链到它的项目同时换到新版本：
+
+```bash
+git -C ~/src/skills pull --ff-only     # 或 git -C ~/src/skills checkout vX.Y.Z 锁到某个版本
+for d in ~/src/skills/skills/jy-*/; do ln -sfn "${d%/}" ".claude/skills/$(basename "$d")"; done
+find .claude/skills -maxdepth 1 -type l -lname "$HOME/src/skills/*" ! -exec test -e {} \; -print -delete
+```
 
 注意：
 
