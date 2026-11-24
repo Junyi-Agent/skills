@@ -9,7 +9,6 @@
     "scripts/",
     ".pre-commit-config.yaml",
     "ruff.toml",
-    "CLAUDE.md",
-    "skills/jy-repo-maintain/"
+    "CLAUDE.md"
   ]
 }

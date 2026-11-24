@@ -5,9 +5,10 @@ Usage: repo_check.py check (skills|adrs) [-o text|json]
 
 check skills (CLAUDE.md, README.md):
   - every skills/<name>/ with a SKILL.md has the symlink .claude/skills/<name> -> ../../skills/<name>
-  - every entry in .claude/skills/ is such a symlink to an existing skill (none dangling)
+  - every entry in .claude/skills/ is such a symlink to an existing skill (none dangling),
+    or a real directory with a SKILL.md: an internal skill used only in this repo
   - the frontmatter name in SKILL.md equals the directory name
-  - README.md lists the skill as [`<name>`](skills/<name>)
+  - README.md lists the skill as [`<name>`](skills/<name>), and never names an internal skill
 
 check adrs (docs/adr/README.md):
   - every docs/adr/NNNN-*.md has a line "状态：<提议|采纳|已验证|已取代（见 NNNN）>"
@@ -50,6 +51,16 @@ def adr_verification(text: str) -> str:
     return "\n".join(ln for ln in lines if not ln.strip().startswith(PLACEHOLDER)).strip()
 
 
+def check_name(skill_md: Path, where: str) -> list[str]:
+    m = FRONTMATTER_NAME.match(skill_md.read_text())
+    name = skill_md.parent.name
+    if not m:
+        return [f"{where}/SKILL.md 的 frontmatter 没有 name"]
+    if m.group(1) != name:
+        return [f"{where}/SKILL.md 的 name 是 {m.group(1)!r}，应与目录名 {name!r} 一致"]
+    return []
+
+
 def check_skills(root: Path) -> list[str]:
     problems = []
     skills_dir = root / "skills"
@@ -76,13 +87,7 @@ def check_skills(root: Path) -> list[str]:
                 f"ln -sfn {want} .claude/skills/{name}"
             )
 
-        m = FRONTMATTER_NAME.match((skills_dir / name / "SKILL.md").read_text())
-        if not m:
-            problems.append(f"skills/{name}/SKILL.md 的 frontmatter 没有 name")
-        elif m.group(1) != name:
-            problems.append(
-                f"skills/{name}/SKILL.md 的 name 是 {m.group(1)!r}，应与目录名 {name!r} 一致"
-            )
+        problems += check_name(skills_dir / name / "SKILL.md", f"skills/{name}")
 
         if f"[`{name}`](skills/{name})" not in readme_text:
             problems.append(
@@ -91,7 +96,14 @@ def check_skills(root: Path) -> list[str]:
 
     if links_dir.is_dir():
         for link in sorted(links_dir.iterdir()):
-            if link.name not in names:
+            if link.is_dir() and not link.is_symlink() and (link / "SKILL.md").is_file():
+                problems += check_name(link / "SKILL.md", f".claude/skills/{link.name}")
+                if link.name in readme_text:
+                    problems.append(
+                        f"README.md 提到了内部 skill {link.name}：它只在本仓库用，"
+                        "不在 README 和安装说明里出现"
+                    )
+            elif link.name not in names:
                 problems.append(
                     f".claude/skills/{link.name} 没有对应的 skills/{link.name}/SKILL.md："
                     "删掉这个软链接，或把 skill 放进 skills/"

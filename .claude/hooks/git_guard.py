@@ -615,11 +615,9 @@ def loop_mode() -> bool:
 
 
 def maintain_script(project: Path = PROJECT) -> Path:
-    """maintain.py of the checkout: skills/ in this repo; .claude/skills/ (symlinks into a
-    submodule) in a repo that copies this hook unchanged. A missing script fails the check."""
-    rel = Path("jy-repo-maintain") / "scripts" / "maintain.py"
-    candidates = [project / "skills" / rel, project / ".claude" / "skills" / rel]
-    return next((p for p in candidates if p.is_file()), candidates[0])
+    """maintain.py of the checkout. jy-repo-maintain is an internal skill kept in
+    .claude/skills/, not in the published skills/. A missing script fails the check."""
+    return project / ".claude" / "skills" / "jy-repo-maintain" / "scripts" / "maintain.py"
 
 
 def maintain_policy(args: list[str], cwd: str) -> tuple[int, str]:
