@@ -505,8 +505,33 @@ def is_commit(cwd: str, rev: str) -> bool:
     return r is not None and r.returncode == 0
 
 
+def in_submodule(cwd: str) -> bool:
+    r = run_git(cwd, "rev-parse", "--show-superproject-working-tree")
+    return r is not None and r.returncode == 0 and bool(r.stdout.strip())
+
+
+def pins_submodule(rest: list[str], cwd: str) -> bool:
+    """`git checkout [--detach] <commit>` in a submodule, where <commit> is not a local branch.
+
+    This pins the submodule to a tag or commit, as `git submodule update` does; it does not
+    switch a branch of the repo the agent works in.
+    """
+    if any(a.startswith("-") and a not in ("--detach", "-q", "--quiet") for a in rest):
+        return False
+    positional = [a for a in rest if not a.startswith("-")]
+    if len(positional) != 1:
+        return False
+    target = positional[0]
+    branch = run_git(cwd, "show-ref", "--verify", "--quiet", f"refs/heads/{target}")
+    if branch is None or branch.returncode == 0:
+        return False
+    return is_commit(cwd, target) and in_submodule(cwd)
+
+
 def checkout_switches(rest: list[str], cwd: str) -> bool:
     """Whether `git checkout <rest>` switches branch rather than restoring files."""
+    if pins_submodule(rest, cwd):
+        return False
     if any(a in SWITCH_OPTS or a.startswith(("--orphan=", "--track=")) for a in rest):
         return True
     if "--" in rest or any(a in ("-p", "--patch") for a in rest):

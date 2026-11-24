@@ -433,6 +433,55 @@ class GitGuardTest(unittest.TestCase):
         self.assertFalse(self.denied("gh api repos/o/r/pulls/3", self.main))
 
 
+class SubmoduleCheckoutTest(unittest.TestCase):
+    """#34: pinning a submodule to a tag is not switching a branch."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.TemporaryDirectory()
+        root = Path(cls.tmp.name)
+        up = str(make_repo(root, "up", "main"))
+        for tag in ("v1.0.0", "v1.1.0"):
+            git(up, "commit", "-q", "--allow-empty", "-m", tag)
+            git(up, "tag", "-a", tag, "-m", tag)
+        git(up, "branch", "dev")
+        git(up, "tag", "-a", "dev-tag-and-branch", "-m", "t")
+        cls.proj = str(make_repo(root, "proj", "main"))
+        git(cls.proj, "-c", "protocol.file.allow=always", "submodule", "add", "-q", up, "sub")
+        git(cls.proj, "commit", "-qm", "add sub")
+        cls.sub = str(Path(cls.proj) / "sub")
+        git(cls.sub, "branch", "dev", "origin/dev")
+        git(cls.sub, "branch", "dev-tag-and-branch")
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.tmp.cleanup()
+
+    def test_pinning_a_submodule_to_a_tag_is_allowed(self):
+        for cmd in (
+            "git -C sub checkout v1.0.0",
+            "git -C sub checkout --detach v1.1.0",
+            "git -C sub checkout -q v1.0.0",
+            "cd sub && git checkout v1.1.0",
+            "git -C sub fetch --tags && git -C sub checkout v1.0.0",
+        ):
+            self.assertIsNone(check(cmd, self.proj), cmd)
+
+    def test_branches_in_a_submodule_are_still_denied(self):
+        for cmd in (
+            "git -C sub checkout dev",
+            "git -C sub checkout dev-tag-and-branch",
+            "git -C sub checkout -b x v1.0.0",
+            "git -C sub checkout -",
+            "git -C sub switch --detach v1.0.0",
+        ):
+            self.assertIsNotNone(check(cmd, self.proj), cmd)
+
+    def test_superproject_is_not_a_submodule(self):
+        self.assertIsNotNone(check("git checkout HEAD", self.proj))
+        self.assertIsNotNone(check("git checkout --detach HEAD", self.proj))
+
+
 class MaintainScriptTest(unittest.TestCase):
     """maintain.py is found in skills/ (this repo) or .claude/skills/ (a repo that copies
     the hook and links the skills in)."""
