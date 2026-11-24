@@ -16,56 +16,33 @@
 
 ## 安装到项目
 
-用 git submodule 引用本仓库，再把各 skill 软链接进项目的 `.claude/skills/`。软链接用相对路径，和 submodule 一起提交，同事 clone 后直接能用。在项目根目录执行：
+在项目根目录用 git submodule 引用本仓库，再把各 skill 软链接进 `.claude/skills/`：
 
 ```bash
 git submodule add https://github.com/Junyi-Agent/skills.git .claude/jy-skills
-git -C .claude/jy-skills checkout v1.0.0          # 锁定到某个版本，版本列表见 CHANGELOG.md
+git -C .claude/jy-skills checkout v2.0.0          # 锁定版本，版本列表见 CHANGELOG.md
 mkdir -p .claude/skills
 for d in .claude/jy-skills/skills/jy-*/; do n="$(basename "$d")"; ln -sfn "../jy-skills/skills/$n" ".claude/skills/$n"; done
-git add .gitmodules .claude
-git commit -m "Add jy skills v1.0.0"
+git add .gitmodules .claude && git commit -m "Add jy skills v2.0.0"
 ```
 
-同事 clone 时加 `--recurse-submodules`；已经 clone 的，执行 `git submodule update --init`。
+同事 clone 时加 `--recurse-submodules`，已经 clone 的执行 `git submodule update --init`。不想用 submodule 的，也可以把 `skills/` 下的各 skill 软链接到本机的一个 clone，或者链进 `~/.claude/skills` 全局使用。
 
-也可以不用 submodule，把各 skill 软链接到本机的一个 clone。适合一个 clone 在多个项目里共用，或者链进 `~/.claude/skills` 全局使用：
-
-```bash
-git clone https://github.com/Junyi-Agent/skills.git ~/src/skills
-mkdir -p .claude/skills
-for d in ~/src/skills/skills/jy-*/; do ln -sfn "${d%/}" ".claude/skills/$(basename "$d")"; done
-```
+- Windows 上软链接需要开启开发者模式，并设置 `git config core.symlinks true`。
+- claude.ai 上用：把 skill 目录打成 zip，在 Settings → Capabilities → Skills 上传。
 
 ## 更新
 
-先读 [`CHANGELOG.md`](CHANGELOG.md) 里新版本的「不兼容」一节，再执行：
+在 Claude Code 里运行 `/jy-skills-update`，两种装法都支持。手动更新先读 [`CHANGELOG.md`](CHANGELOG.md) 里新版本的「不兼容」一节，再执行：
 
 ```bash
-git -C .claude/jy-skills fetch --tags
-git -C .claude/jy-skills checkout v1.1.0          # 目标版本
-# 链接新增的 skill，删掉指向已删除 skill 的链接（只删指向 jy-skills 的）
+git -C .claude/jy-skills fetch --tags && git -C .claude/jy-skills checkout vX.Y.Z
 for d in .claude/jy-skills/skills/jy-*/; do n="$(basename "$d")"; ln -sfn "../jy-skills/skills/$n" ".claude/skills/$n"; done
 find .claude/skills -maxdepth 1 -type l -lname '../jy-skills/*' ! -exec test -e {} \; -print -delete
-git add -A .claude
-git commit -m "Update jy skills to v1.1.0"
+git add -A .claude && git commit -m "Update jy skills to vX.Y.Z"
 ```
 
-同事拉到这个提交后执行 `git submodule update` 才会切到新版本。
-
-软链接到本机 clone 的，在 clone 里拉新版本，再补链接、删悬空链接。clone 更新后，所有链到它的项目同时换到新版本：
-
-```bash
-git -C ~/src/skills pull --ff-only     # 或 git -C ~/src/skills checkout vX.Y.Z 锁到某个版本
-for d in ~/src/skills/skills/jy-*/; do ln -sfn "${d%/}" ".claude/skills/$(basename "$d")"; done
-find .claude/skills -maxdepth 1 -type l -lname "$HOME/src/skills/*" ! -exec test -e {} \; -print -delete
-```
-
-注意：
-
-- 整个 skill 目录一起更新，不要只同步 SKILL.md。skill 里的脚本和 SKILL.md 是配套改的。
-- Windows 上软链接需要开启开发者模式，并设置 `git config core.symlinks true`。
-- claude.ai 上用：把 skill 目录打成 zip，在 Settings → Capabilities → Skills 上传，更新时重新上传。
+第二行链接新增的 skill，第三行删掉指向已删除 skill 的链接。同事拉到这个提交后执行 `git submodule update` 才会切到新版本。
 
 ## 反馈问题
 
@@ -75,6 +52,4 @@ find .claude/skills -maxdepth 1 -type l -lname "$HOME/src/skills/*" ! -exec test
 
 ## 版本
 
-版本号在 [`VERSION`](VERSION)，格式 X.Y.Z：X 变表示引用方要跟着改，Y 是新增 skill 或检查，Z 是修复。每个版本合并到 `main` 后自动打 `vX.Y.Z` tag 并建 GitHub Release。规则见 [ADR 0005](docs/adr/0005-versioning-and-tags.md)。
-
-修改本仓库的流程见 [`CLAUDE.md`](CLAUDE.md)。
+版本号 X.Y.Z，X 变表示引用方要跟着改，每个版本的改动见 [`CHANGELOG.md`](CHANGELOG.md)，规则见 [ADR 0005](docs/adr/0005-versioning-and-tags.md)。修改本仓库的流程见 [`CLAUDE.md`](CLAUDE.md)。
