@@ -458,6 +458,98 @@ class NativeAppTest(unittest.TestCase):
             self.assertIn("类型初判：app 类", facts(s), files)
 
 
+LINT_ALL = """import subprocess, sys
+for cmd in (["black", "--check", "."], ["ruff", "check", "--select", "ALL", "."]):
+    if subprocess.run(cmd).returncode:
+        sys.exit(1)
+"""
+
+
+class HookCalledScriptTest(unittest.TestCase):
+    """#25: follow the repo scripts a hook calls one level deep."""
+
+    def test_follows_called_script(self):
+        for hook in (
+            '#!/bin/sh\nexec python3 "$(git rev-parse --show-toplevel)/scripts/lint_all.py"\n',
+            "#!/bin/sh\npython scripts/lint_all.py\n",
+            "#!/bin/sh\nuv run python scripts/lint_all.py --all\n",
+        ):
+            s = fmt_lint({".githooks/pre-commit": hook, "scripts/lint_all.py": LINT_ALL})
+            self.assertIn("formatter：black", facts(s), hook)
+            self.assertIn("linter：ruff", facts(s), hook)
+            self.assertEqual(s.verdict, "JUDGE", hook)
+            self.assertIn("scripts/lint_all.py", facts(s), hook)
+
+    def test_follows_precommit_entry_and_make(self):
+        s = fmt_lint(
+            {
+                ".pre-commit-config.yaml": (
+                    "repos:\n  - repo: local\n    hooks:\n      - id: lint\n"
+                    "        entry: bash scripts/lint.sh\n        language: system\n"
+                ),
+                "scripts/lint.sh": "#!/bin/sh\nmake lint\n",
+                "Makefile": "lint:\n\tshfmt -d .\n\tshellcheck --enable=all *.sh\n",
+            }
+        )
+        self.assertIn("formatter：shfmt", facts(s))
+        self.assertIn("linter：shellcheck", facts(s))
+        self.assertEqual(s.verdict, "JUDGE")
+
+    def test_no_follow_when_hooks_already_name_both(self):
+        hooks = PRECOMMIT.format(shellcheck_args="        args: [--enable=all]\n")
+        hooks += (
+            "  - repo: local\n    hooks:\n      - id: t\n        entry: python3 scripts/guard.py\n"
+        )
+        s = fmt_lint(
+            {
+                ".pre-commit-config.yaml": hooks,
+                "scripts/guard.py": 'MSG = "do not use SKIP= or black --exit-zero"\n',
+            }
+        )
+        self.assertEqual(s.verdict, "JUDGE")
+        self.assertNotIn("跟进了", facts(s))
+
+    def test_test_files_are_not_followed(self):
+        s = fmt_lint(
+            {
+                ".githooks/pre-commit": "#!/bin/sh\nruff check . && python3 tests/test_x.py\n",
+                "tests/test_x.py": 'CASES = ["black --check", "SKIP=x"]\n',
+            }
+        )
+        self.assertIn("formatter：无", facts(s))
+        self.assertEqual(s.verdict, "FAIL")
+
+    def test_missing_called_script_is_judge(self):
+        s = fmt_lint({".githooks/pre-commit": "#!/bin/sh\nexec python3 scripts/gone.py\n"})
+        self.assertEqual(s.verdict, "JUDGE")
+        self.assertTrue(any("scripts/gone.py" in j for j in s.judge), s.judge)
+
+
+class InstallStepTest(unittest.TestCase):
+    """#35: install steps in docs/ and in the pre-commit config count."""
+
+    def precommit(self, files: dict[str, str]) -> check.Section:
+        files = {".pre-commit-config.yaml": "repos: []\n", **files}
+        with Fixture(files) as root:
+            hook = root / ".git" / "hooks" / "pre-commit"
+            hook.write_text("#!/bin/sh\n")
+            hook.chmod(0o755)
+            return check.check_git_precommit(root, [hook])
+
+    def test_install_step_locations(self):
+        for files in (
+            {"docs/development.md": "uv sync\nuv run pre-commit install\n"},
+            {"docs/CONTRIBUTING.md": "pre-commit install\n"},
+            {".pre-commit-config.yaml": "# Install once: uv run pre-commit install\nrepos: []\n"},
+        ):
+            s = self.precommit(files)
+            self.assertEqual(s.verdict, "PASS", files)
+
+    def test_no_install_step_warns(self):
+        s = self.precommit({"docs/development.md": "uv sync\n"})
+        self.assertEqual(s.verdict, "WARN")
+
+
 class FilesUnderTest(unittest.TestCase):
     def test_skips_pycache_and_pyc(self):
         with Fixture(

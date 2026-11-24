@@ -361,17 +361,11 @@ def check_git_precommit(root: Path, hooks: list[Path]) -> Section:
     )
 
     install_refs = []
-    for name in [
-        "README.md",
-        "CONTRIBUTING.md",
-        "Makefile",
-        "justfile",
-        "package.json",
-        "CLAUDE.md",
-        "AGENTS.md",
-    ]:
-        p = root / name
-        if p.exists():
+    docs = [*DOCS, "Makefile", "justfile", "package.json", ".pre-commit-config.yaml"]
+    docs += [".pre-commit-config.yml"]
+    places = [root / n for n in docs] + sorted((root / "docs").glob("*.md"))
+    for p in dict.fromkeys(places):
+        if p.is_file():
             install_refs += grep(root, p, INSTALL_STEP, limit=2)
     for p in (root / "scripts").glob("*") if (root / "scripts").is_dir() else []:
         if p.is_file():
@@ -409,7 +403,7 @@ LINTERS = re.compile(
 # listed: `style` is its default and every other level reports less.
 STRICT = re.compile(
     r"(?i)--strict|strict\s*=\s*true|typeCheckingMode\s*[:=]\s*\"?strict|"
-    r"^\s*(extend-)?select\s*=\s*\[|--select[= ]ALL\b|--enable[= ]all|(^|\s)-o\s*all\b|"
+    r"^\s*(extend-)?select\s*=\s*\[|--select[\"']?(?:[= ]|,\s*)[\"']?ALL\b|--enable[= ]all|(^|\s)-o\s*all\b|"
     r"--max-warnings[= ]0|-D\s*warnings|--deny[= ]warnings|"
     r"disallow_untyped_defs|warn_unused_ignores|--exit-non-zero-on-fix|\"strict\"\s*:\s*true|"
     r"--fail-on|--error|"
@@ -466,10 +460,64 @@ def hook_texts(root: Path, hooks: list[Path]) -> list[Path]:
     return files
 
 
+# Repo files a hook runs, so checks kept in `scripts/lint.py` or a Makefile are seen too.
+TOPLEVEL = re.compile(r"\$\(git rev-parse --show-toplevel\)/")
+INTERP_CALL = re.compile(
+    r"(?:^|[\s;&|(`\"'])(?:(?:uv|poetry|pipenv|pdm|hatch)\s+run\s+)?"
+    r"(?:(?:exec|python[\d.]*|sh|bash|zsh|node|ruby|perl)\s+)+(?:-[\w-]+\s+)*[\"']?"
+    r"(\.?/?[\w.-]+(?:/[\w.-]+)*)"
+)
+BARE_PATH = re.compile(
+    r"(?:^|[\s;&|(:\"'])(\.?/?(?:[\w.-]+/)+[\w.-]+\.(?:py|sh|bash|zsh|js|mjs|cjs|ts|rb|pl))\b"
+)
+TASK_CALL = re.compile(r"(?:^|[\s;&|(\"'])(make|just|npm run|pnpm run|yarn run|task)\b")
+TASK_FILES = {
+    "make": "Makefile",
+    "just": "justfile",
+    "npm run": "package.json",
+    "pnpm run": "package.json",
+    "yarn run": "package.json",
+    "task": "Taskfile.yml",
+}
+
+
+def called_files(root: Path, files: list[Path], depth: int = 2) -> tuple[list[Path], list[str]]:
+    """Repo files that `files` run (followed `depth` levels), and called paths that are missing."""
+    top = root.resolve()
+    seen = {f.resolve() for f in files}
+    found, missing, frontier = [], [], list(files)
+    for _ in range(depth):
+        nxt = []
+        for f in frontier:
+            text = TOPLEVEL.sub("", read(f))
+            calls = [(m.group(1), True) for m in INTERP_CALL.finditer(text)]
+            calls += [(m.group(1), False) for m in BARE_PATH.finditer(text)]
+            calls += [(TASK_FILES[m.group(1)], False) for m in TASK_CALL.finditer(text)]
+            for c, is_call in calls:
+                p = (root / c.removeprefix("./")).resolve()
+                if TEST_FILE.search(p.name):  # a hook running unit tests is not a lint runner
+                    continue
+                if p.is_file() and p.is_relative_to(top):
+                    if p not in seen:
+                        seen.add(p)
+                        found.append(root / p.relative_to(top))
+                        nxt.append(found[-1])
+                elif is_call and "/" in c and not p.exists():
+                    missing.append(c)
+        frontier = nxt
+    return found, list(dict.fromkeys(missing))
+
+
 def check_fmt_lint(root: Path, hooks: list[Path]) -> Section:
     s = Section(3, "pre-commit 做 formatter + 严格 linter")
     files = hook_texts(root, hooks)
     text = "\n".join(read(f) for f in files)
+    called, missing = [], []
+    if not (FORMATTERS.search(text) and LINTERS.search(text)):
+        # Only when the hooks alone lack one: followed scripts hold tool names as data too.
+        called, missing = called_files(root, files)
+        files += called
+        text += "\n" + "\n".join(read(f) for f in called)
     if not text.strip():
         s.facts.append("没有任何 hook 配置或已安装的 hook")
         return s
@@ -480,6 +528,11 @@ def check_fmt_lint(root: Path, hooks: list[Path]) -> Section:
     lints = sorted({m.group(1).lower() for m in LINTERS.finditer(text)})
     s.facts.append(f"formatter：{', '.join(fmts) or '无'}")
     s.facts.append(f"linter：{', '.join(lints) or '无'}")
+    if called:
+        s.facts.append("跟进了 hook 调用的文件：" + ", ".join(rel(root, f) for f in called))
+        for f in called:
+            hits = grep(root, f, FORMATTERS, limit=2) + grep(root, f, LINTERS, limit=2)
+            s.evidence += [f"调用：{e}" for e in hits]
 
     strict, weak = [], []
     for f in files + [root / c for c in LINT_CONFIGS if (root / c).is_file()]:
@@ -489,7 +542,13 @@ def check_fmt_lint(root: Path, hooks: list[Path]) -> Section:
             weak += grep(root, f, MYPY_WEAK, limit=4)
     s.evidence += [f"严格：{e}" for e in strict[:6]] + [f"放宽：{e}" for e in weak[:6]]
 
-    if not fmts or not lints:
+    if (not fmts or not lints) and missing:
+        s.verdict = "JUDGE"
+        s.judge.append(
+            f"hook 调用了 {', '.join(f'`{m}`' for m in missing)}，脚本在 repo 里找不到，"
+            "请读 hook 判断 formatter / linter 在哪里跑"
+        )
+    elif not fmts or not lints:
         s.verdict = "FAIL"
     elif weak:
         s.verdict = "WARN"
