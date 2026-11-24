@@ -539,6 +539,10 @@ class MaintainScriptTest(unittest.TestCase):
         self.assertEqual(git_guard.maintain_script(root), want)
 
     def test_this_repo(self):
+        """A repo that runs the loop (has .claude/maintain.json) has the script. A repo that
+        copies this hook without running the loop has neither, and is not checked."""
+        if not git_guard.MAINTAIN_CONFIG.is_file():
+            self.skipTest("this repo runs no maintain loop (no .claude/maintain.json)")
         self.assertTrue(git_guard.maintain_script().is_file())
 
 

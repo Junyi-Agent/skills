@@ -4,6 +4,12 @@
 
 每节分「不兼容」「新增」「修复」三类，没有的类别不写。「不兼容」里写清楚引用方要改什么。
 
+## 2.0.1 — 2026-11-24
+
+### 修复
+
+- `.claude/hooks/test_git_guard.py` 的 `test_this_repo` 只在有 `.claude/maintain.json`（跑维护 loop）的仓库里检查 `maintain.py` 是否存在。2.0.0 不再发布 `jy-repo-maintain`，原样复制这个测试的引用方按 README 升级后没有 `maintain.py`，测试失败、pre-commit 拦下提交。
+
 ## 2.0.0 — 2026-11-24
 
 ### 不兼容
