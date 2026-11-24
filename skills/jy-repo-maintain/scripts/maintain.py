@@ -9,8 +9,8 @@ Usage:
 
 get issues
   Open issues (pull requests excluded) with their kind and whether the loop may act:
-  actionable when `require_accept_label` is false, when the author is the owner, a member
-  or a collaborator, or when the issue carries `accept_label`. A proposal also needs
+  actionable when `require_accept_label` is false or when the issue carries `accept_label`,
+  whoever opened it: agents file issues under the owner's account. A proposal also needs
   `approve_label` before the loop implements it (`approved` in the output). Issues with
   `log_label` or `wontfix` are skipped.
 
@@ -43,7 +43,6 @@ import sys
 from pathlib import Path
 from xml.sax.saxutils import escape
 
-TRUSTED_AUTHORS = {"OWNER", "MEMBER", "COLLABORATOR"}
 KINDS = ("bug", "proposal", "question", "needs-info")
 DEFAULTS = {
     "require_accept_label": True,
@@ -97,12 +96,9 @@ def classify(issue: dict, config: dict) -> dict | None:
         return None
 
     kind = next((k for k in KINDS if k in labels), "untriaged")
-    trusted = issue.get("author_association") in TRUSTED_AUTHORS
 
     if not config["require_accept_label"]:
         actionable, reason = True, "require_accept_label is off"
-    elif trusted:
-        actionable, reason = True, f"author is {issue['author_association'].lower()}"
     elif config["accept_label"] in labels:
         actionable, reason = True, f"labelled {config['accept_label']}"
     else:

@@ -12,7 +12,7 @@
 
 - 新增 skill `jy-repo-maintain`，每次调用跑一轮：收尾上一轮的 PR → 分诊 issue → 修 bug → 给提议写 ADR → 没活时每 7 天自审一次，把发现开成 issue → 在 `maintain-log` issue 里汇报、列出等人决定的事。
 - 本机 launchd 每 6 小时跑一轮（`maintain.py create schedule`）。放在本机：push 门禁要用本机已登录的 `claude` CLI 和 gh 凭据。launchd 保证同一时间只有一个实例，每轮跑完就退出。主 checkout 有未提交改动时不开始。
-- 外部 issue 要人打 `accepted` 才处理。owner、member、collaborator 开的 issue 直接处理。`.claude/maintain.json` 的 `require_accept_label` 改成 false 即全自动（这个文件是护栏，改它要人合并）。没打标签的 issue，loop 不读正文。
+- issue 要人打 `accepted` 才处理，不论作者是谁，loop 自审开的 `from-review` issue 也一样。agent（`/jy-skills-update`、loop 自审）用 owner 的账号提 issue，按作者放行等于 agent 写的 issue 不经人看就会被处理（2026-11-24 改，原来 owner、member、collaborator 开的 issue 直接处理）。`.claude/maintain.json` 的 `require_accept_label` 改成 false 即全自动（这个文件是护栏，改它要人合并）。没打标签的 issue，loop 不读正文。
 - 提议：loop 写「提议」状态的 ADR 开 PR，人打 `approved` 后，loop 改成「采纳」并实现。「已验证」仍只由人改。
 - 合并：CI 全绿、没改护栏文件、没升 X 版本的 PR，loop 自己 squash merge。其余打 `needs-human-merge` 等人。护栏文件列在 `.claude/maintain.json` 的 `guardrails` 里：`.claude/`、`.github/`、`scripts/`、`.pre-commit-config.yaml`、`ruff.toml`、`CLAUDE.md`、`skills/jy-repo-maintain/`。
 - 强制方式：launchd 给 loop 设 `JY_MAINTAIN_LOOP=1`，`git_guard.py` 从自己的环境变量读到后进入 loop 模式：
@@ -24,7 +24,7 @@
 
 ## 后果
 
-- 人只需要做：给外部 issue 打 `accepted`，给提议打 `approved`，合并 `needs-human-merge` 的 PR，看 `maintain-log`。
+- 人只需要做：给 issue 打 `accepted`，给提议打 `approved`，合并 `needs-human-merge` 的 PR，看 `maintain-log`。
 - 每轮都会调用 Claude（loop 本身 + 每次 push 的 3 个审查），空转时也要读一次 issue 列表。
 - loop 和人用同一个 GitHub 账号（Junyi-Agent），无法从作者区分。loop 的评论靠第一行的 `<!-- jy-repo-maintain -->` 标记区分；标签靠 git_guard 拦 loop。人在网页上打的标签无法和 loop 绕过 git_guard 打的区分。
 - loop 用 `bypassPermissions` 运行，靠 hook、push 门禁、CI 和服务端分支保护约束。已知缺口：

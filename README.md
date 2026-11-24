@@ -74,7 +74,7 @@ find .claude/skills -maxdepth 1 -type l -lname "$HOME/src/skills/*" ! -exec test
 
 在 [Issues](https://github.com/Junyi-Agent/skills/issues/new/choose) 选「问题」或「建议」模板。在 Claude Code 里装好本仓库后，也可以运行 `/jy-skills-update`：它会检查新版本，回顾你项目里使用 jy skill 的会话，把发现的问题写成草稿，你确认后再提。
 
-维护者打上 `accepted` 标签后，维护 loop 才会处理外部 issue。建议类 issue 会先写一篇 ADR，维护者打 `approved` 后才实现。
+维护者打上 `accepted` 标签后，维护 loop 才会处理 issue，包括维护者自己和 agent 开的。建议类 issue 会先写一篇 ADR，维护者打 `approved` 后才实现。
 
 ## 版本
 
