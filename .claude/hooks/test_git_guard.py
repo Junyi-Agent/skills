@@ -384,6 +384,54 @@ class GitGuardTest(unittest.TestCase):
         self.assertFalse(self.denied("git commit -am x", self.feat))
         self.assertFalse(self.denied("git grep hooksPath", self.feat))
 
+    def test_no_verify_abbreviations(self):
+        # git accepts any unique prefix of a long option: --no-veri is --no-verify
+        for cmd in (
+            "git commit --no-veri -m x",
+            "git commit --no-verif -m x",
+            "git push --no-veri",
+            "git push --no-verif origin feature",
+            "git merge --no-veri other",
+        ):
+            self.assertTrue(self.denied(cmd, self.feat), cmd)
+        for cmd in (
+            "git merge --no-verify-signatures other",
+            "git commit --no-edit --amend",
+            "git push -n origin feature",
+        ):
+            self.assertFalse(self.denied(cmd, self.feat), cmd)
+
+    def test_git_and_gh_by_path(self):
+        for cmd in (
+            "/usr/bin/git push --no-verify",
+            "/usr/bin/git switch x",
+            "./git checkout other",
+            "/usr/bin/env git push --no-verify",
+            "/usr/bin/env /usr/bin/git switch x",
+            "/usr/bin/nohup git switch x",
+            "/usr/bin/git push origin main",
+        ):
+            self.assertTrue(self.denied(cmd, self.feat), cmd)
+        self.assertTrue(self.denied("/usr/bin/git commit -m x", self.main))
+        self.assertTrue(self.denied("/opt/homebrew/bin/gh api -X PUT repos/o/r/pulls/3/merge", "/"))
+        self.assertFalse(self.denied("/usr/bin/git status", self.feat))
+        with mock.patch.object(git_guard, "pr_checks", return_value=(1, "checks failed")):
+            self.assertTrue(self.denied("/opt/homebrew/bin/gh pr merge 1", self.main))
+
+    def test_exported_hookspath(self):
+        for cmd in (
+            "export GIT_CONFIG_PARAMETERS=\"'core.hooksPath=/dev/null'\"; git push",
+            "export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.hooksPath GIT_CONFIG_VALUE_0=/x; git push",
+            "declare -x GIT_CONFIG_PARAMETERS=\"'core.hooksPath=/x'\"",
+            "typeset -x GIT_CONFIG_VALUE_0=core.hooksPath",
+            "GIT_CONFIG_PARAMETERS=\"'core.hooksPath=/x'\"; export GIT_CONFIG_PARAMETERS; git push",
+        ):
+            self.assertTrue(self.denied(cmd, self.feat), cmd)
+        # SKIP= exported on its own is a known gap (docs/adr/0001, Consequences)
+        self.assertFalse(self.denied("export SKIP=x; git status", self.feat))
+        self.assertFalse(self.denied("export PATH=/usr/bin:$PATH; git status", self.feat))
+        self.assertFalse(self.denied("FOO=1", self.feat))
+
     def test_pr_merge_requires_green_checks(self):
         calls = []
 
@@ -543,6 +591,8 @@ class LoopModeTest(unittest.TestCase):
             "gh workflow disable ci",
             "gh release create v9.9.9",
             "GH_TOKEN=x gh repo delete o/r --yes",
+            "/opt/homebrew/bin/gh secret set X",
+            "/usr/bin/env gh workflow disable ci",
             "gh",
         ):
             self.assertTrue(self.denied(cmd), cmd)

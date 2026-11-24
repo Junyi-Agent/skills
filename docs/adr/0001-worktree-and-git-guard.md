@@ -9,7 +9,8 @@ agent 在主目录直接切分支或在 `main` 上提交，会打乱用户正在
 ## 决策
 
 - 每个新功能在仓库目录之外建 worktree：`git worktree add ../skills-repo-<feature> -b <feature> origin/main`。
-- `.claude/hooks/git_guard.py`（PreToolUse，Bash）拒绝：在当前目录 `git switch` / `git checkout <branch>`、在 `main` 上产生提交（commit、merge、cherry-pick、revert、am；`--ff-only`、`--squash`、`--no-commit`、`--abort` 等不产生提交的放行，`--skip` 会继续提交后面的序列，不放行）、push 到 `main`（含在 `main` 上 `git push origin HEAD`）、用 `--no-verify` / `SKIP=` / `core.hooksPath`（含 `GIT_CONFIG_*` 环境变量）跳过 git hook。
+- `.claude/hooks/git_guard.py`（PreToolUse，Bash）拒绝：在当前目录 `git switch` / `git checkout <branch>`、在 `main` 上产生提交（commit、merge、cherry-pick、revert、am；`--ff-only`、`--squash`、`--no-commit`、`--abort` 等不产生提交的放行，`--skip` 会继续提交后面的序列，不放行）、push 到 `main`（含在 `main` 上 `git push origin HEAD`）、用 `--no-verify`（含 git 接受的缩写 `--no-veri`、`--no-verif`）/ `SKIP=` / `core.hooksPath`（含 `GIT_CONFIG_*` 环境变量，写在命令前面、用 `export` / `declare` / `typeset` 导出、或单独一段赋值都算）跳过 git hook。
+- 命令按文件名判断：`/usr/bin/git`、`/opt/homebrew/bin/gh`、`/usr/bin/env` 这类带路径的调用和 `git`、`gh`、`env` 一样检查。
 - `git checkout <path>` 恢复文件不算切分支：只有一个参数、且它是已存在的路径而不是 commit 时放行；`--`、`-p` 和 `<tree-ish> <path>` 形式都放行。
 - 在 submodule 里（`git rev-parse --show-superproject-working-tree` 非空）把它固定到某个 tag 或 commit 不算切分支：`git checkout [--detach] [-q] <commit>` 放行，`<commit>` 是本地分支名时不放行。这和 `git submodule update` 的效果一样，引用方按 README 更新 submodule 时要用到（#34）。submodule 里的 `switch`、`checkout <branch>`、`-b` 等照旧拒绝。
 - 分支按命令实际运行的目录判断，跟随同一条命令里的 `cd`、`pushd`/`popd`、`( ... )` 子 shell、`env -C` 和 `git -C`。
