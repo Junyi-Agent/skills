@@ -2,14 +2,16 @@
 """PreToolUse hook (Bash): enforce the worktree workflow from CLAUDE.md.
 
 Denies switching branches in place, creating commits on main (commit, merge, cherry-pick,
-revert, am), pushing to main, skipping the git hooks (--no-verify, SKIP=, core.hooksPath,
-including through GIT_CONFIG_* variables), and merging a PR whose CI checks have not all
+revert, am), pushing to main, skipping the git hooks (--no-verify or a prefix of it such as
+--no-veri, SKIP=, core.hooksPath, including through GIT_CONFIG_* variables set in front of
+a command, by `export`/`declare`/`typeset`, or by a bare assignment), and merging a PR whose CI checks have not all
 passed (`gh pr merge`, or the merge endpoint through `gh api`).
 
 The branch is read from the directory each git command actually runs in: `cd <dir>`,
 `pushd`/`popd` earlier in the same command, `( ... )` subshells, `env -C <dir>` and
-`git -C <dir>` are all followed. Wrappers are looked through: `env VAR=x`, `command`,
-`exec`, `nohup`, `time`, `env -S` (with their options, parsed like getopt), and
+`git -C <dir>` are all followed. Commands are matched by their base name, so
+`/usr/bin/git` and `/opt/homebrew/bin/gh` count as git and gh. Wrappers are looked through: `env VAR=x`, `command`,
+`exec`, `nohup`, `time` (also by path, `/usr/bin/env`), `env -S` (with their options, parsed like getopt), and
 `bash -c '...'`, which also inherits the `VAR=x` words in front of it. Git aliases are
 expanded. Text fed to a shell that reads its script from stdin (`bash <<EOF`,
 `bash <<< '...'`, `cat <<EOF | bash`, `echo '...' | bash`) is checked as a script, in the
@@ -78,6 +80,8 @@ WRAPPER_VALUE_OPTS = {"-a", "-f", "-o", "--format", "--output"}
 ENV_VALUE_SHORT = "uCSPa"
 ENV_VALUE_LONG = {"--unset", "--chdir", "--split-string", "--argv0"}
 SHELLS = {"bash", "sh", "zsh", "dash", "ksh"}
+# Shell builtins that put `VAR=value` words into the environment of later commands.
+EXPORTERS = {"export", "declare", "typeset", "local", "readonly"}
 # Shell options that take the next word as their value: `-o pipefail`, `-O extglob`.
 SHELL_VALUE_FLAGS = "oO"
 SHELL_VALUE_LONG = {"--rcfile", "--init-file"}
@@ -289,21 +293,30 @@ def env_flags(assignment: str) -> set[str]:
     return flags
 
 
+def is_no_verify(arg: str) -> bool:
+    """`--no-verify` or a prefix git accepts for it (`--no-veri`; `--no-ver` is ambiguous)."""
+    return arg.startswith("--no-veri") and "--no-verify".startswith(arg)
+
+
 def unwrap(seg: list[str], cwd: str) -> tuple[list[str], set[str], str]:
-    """Drop leading `VAR=x` words and wrappers.
+    """Drop leading `VAR=x` words and wrappers (also called by path: `/usr/bin/env`).
 
     Returns the command, the hook-skipping flags its environment sets (see env_flags),
     and the directory it runs in (`env -C <dir>` changes it for this command only).
+    Only the words in front of this command are seen: `export SKIP=x` in an earlier command
+    is not tracked (an accepted gap, docs/adr/0001). `check` denies an `export` or bare
+    assignment that sets core.hooksPath through GIT_CONFIG_* without tracking variables.
     """
     flags: set[str] = set()
     while seg:
         word = seg[0]
+        name = os.path.basename(word)
         if ASSIGNMENT.match(word):
             flags |= env_flags(word)
             seg = seg[1:]
-        elif word == "env":
+        elif name == "env":
             seg, cwd = unwrap_env(seg[1:], cwd)
-        elif word in WRAPPERS:
+        elif name in WRAPPERS:
             seg = seg[1:]
             while seg and seg[0].startswith("-"):
                 seg = seg[2:] if seg[0] in WRAPPER_VALUE_OPTS else seg[1:]
@@ -693,7 +706,9 @@ def check_git(seg: list[str], cwd: str, flags: set[str]) -> str | None:
     if shell is not None:  # `!` alias: git runs it from the top of the work tree
         return check(shell, git_cwd, flags)
 
-    if sub in ("commit", "push", "merge") and ("skip" in flags or "--no-verify" in rest):
+    if sub in ("commit", "push", "merge") and (
+        "skip" in flags or any(is_no_verify(a) for a in rest)
+    ):
         return BYPASS_MSG
     if sub == "commit" and any(re.fullmatch(r"-[a-zA-Z]*n[a-zA-Z]*", a) for a in rest):
         return BYPASS_MSG
@@ -748,8 +763,15 @@ def check(command: str, cwd: str, inherited: set[str] | None = None) -> str | No
         seg, flags, seg_cwd = unwrap([w for w in raw if not w.startswith(HEREDOC)], cwd)
         flags |= inherited
         last = own + printed_text(seg) + (stdin if passes_stdin_on(seg) else [])
-        if not seg:
+        if not seg:  # only assignments: `GIT_CONFIG_PARAMETERS=...; export ...; git push`
+            if "hookspath" in flags:
+                return BYPASS_MSG
             continue
+        name = os.path.basename(seg[0])
+        if name in EXPORTERS and any(
+            "hookspath" in env_flags(a) for a in seg[1:] if ASSIGNMENT.match(a)
+        ):
+            return BYPASS_MSG
 
         script = shell_script(seg)
         if script is not None:
@@ -777,20 +799,20 @@ def check(command: str, cwd: str, inherited: set[str] | None = None) -> str | No
             cwd = dirs.pop() if dirs else cwd
             continue
 
-        if seg[0] == "gh" and loop_mode():
+        if name == "gh" and loop_mode():
             reason = check_gh_loop(seg)
             if reason:
                 return reason
-        if seg[0] == "gh" and seg[1:3] == ["pr", "merge"]:
+        if name == "gh" and seg[1:3] == ["pr", "merge"]:
             reason = check_pr_merge(seg[3:], seg_cwd)
             if reason:
                 return reason
             continue
-        if seg[0] == "gh" and len(seg) > 1 and seg[1] == "api":
+        if name == "gh" and len(seg) > 1 and seg[1] == "api":
             if any(re.search(r"/pulls/[^/\s]+/merge\b", a) for a in seg[2:]):
                 return MERGE_API_MSG
             continue
-        if seg[0] == "git":
+        if name == "git":
             reason = check_git(seg, seg_cwd, flags)
             if reason:
                 return reason
