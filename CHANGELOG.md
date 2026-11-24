@@ -9,6 +9,7 @@
 ### 新增
 
 - `jy-repo-maintain`：所有 issue 都要人打 `accepted` 才处理，包括 owner、member、collaborator 开的和 loop 自审开的 `from-review` issue。agent（`/jy-skills-update`、loop 自审）用 owner 的账号提 issue，原来按作者放行，agent 写的 issue 不经人看就会被处理。用了这个 skill 的仓库，升级后要给想让 loop 处理的已有 issue 补打 `accepted`；不想要这一层的，把 `.claude/maintain.json` 的 `require_accept_label` 设成 false。
+
 ## 1.2.1 — 2026-11-24
 
 ### 修复
