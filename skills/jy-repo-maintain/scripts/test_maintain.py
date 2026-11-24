@@ -44,9 +44,12 @@ class ClassifyTest(unittest.TestCase):
         c = maintain.classify(issue("CONTRIBUTOR", ("bug", "accepted")), CONFIG)
         self.assertTrue(c["actionable"])
 
-    def test_owner_issue_is_actionable(self):
+    def test_owner_issue_also_waits_for_label(self):
+        # agents file issues under the owner's account, so the author proves nothing
         for assoc in ("OWNER", "MEMBER", "COLLABORATOR"):
-            self.assertTrue(maintain.classify(issue(assoc), CONFIG)["actionable"], assoc)
+            c = maintain.classify(issue(assoc, ("bug", "from-review")), CONFIG)
+            self.assertFalse(c["actionable"], assoc)
+            self.assertTrue(maintain.classify(issue(assoc, ("accepted",)), CONFIG)["actionable"])
 
     def test_full_auto_mode(self):
         config = dict(CONFIG, require_accept_label=False)
