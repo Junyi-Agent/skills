@@ -384,6 +384,54 @@ class GitGuardTest(unittest.TestCase):
         self.assertFalse(self.denied("git commit -am x", self.feat))
         self.assertFalse(self.denied("git grep hooksPath", self.feat))
 
+    def test_no_verify_abbreviations(self):
+        # git accepts any unique prefix of a long option: --no-veri is --no-verify
+        for cmd in (
+            "git commit --no-veri -m x",
+            "git commit --no-verif -m x",
+            "git push --no-veri",
+            "git push --no-verif origin feature",
+            "git merge --no-veri other",
+        ):
+            self.assertTrue(self.denied(cmd, self.feat), cmd)
+        for cmd in (
+            "git merge --no-verify-signatures other",
+            "git commit --no-edit --amend",
+            "git push -n origin feature",
+        ):
+            self.assertFalse(self.denied(cmd, self.feat), cmd)
+
+    def test_git_and_gh_by_path(self):
+        for cmd in (
+            "/usr/bin/git push --no-verify",
+            "/usr/bin/git switch x",
+            "./git checkout other",
+            "/usr/bin/env git push --no-verify",
+            "/usr/bin/env /usr/bin/git switch x",
+            "/usr/bin/nohup git switch x",
+            "/usr/bin/git push origin main",
+        ):
+            self.assertTrue(self.denied(cmd, self.feat), cmd)
+        self.assertTrue(self.denied("/usr/bin/git commit -m x", self.main))
+        self.assertTrue(self.denied("/opt/homebrew/bin/gh api -X PUT repos/o/r/pulls/3/merge", "/"))
+        self.assertFalse(self.denied("/usr/bin/git status", self.feat))
+        with mock.patch.object(git_guard, "pr_checks", return_value=(1, "checks failed")):
+            self.assertTrue(self.denied("/opt/homebrew/bin/gh pr merge 1", self.main))
+
+    def test_exported_hookspath(self):
+        for cmd in (
+            "export GIT_CONFIG_PARAMETERS=\"'core.hooksPath=/dev/null'\"; git push",
+            "export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.hooksPath GIT_CONFIG_VALUE_0=/x; git push",
+            "declare -x GIT_CONFIG_PARAMETERS=\"'core.hooksPath=/x'\"",
+            "typeset -x GIT_CONFIG_VALUE_0=core.hooksPath",
+            "GIT_CONFIG_PARAMETERS=\"'core.hooksPath=/x'\"; export GIT_CONFIG_PARAMETERS; git push",
+        ):
+            self.assertTrue(self.denied(cmd, self.feat), cmd)
+        # SKIP= exported on its own is a known gap (docs/adr/0001, Consequences)
+        self.assertFalse(self.denied("export SKIP=x; git status", self.feat))
+        self.assertFalse(self.denied("export PATH=/usr/bin:$PATH; git status", self.feat))
+        self.assertFalse(self.denied("FOO=1", self.feat))
+
     def test_pr_merge_requires_green_checks(self):
         calls = []
 
@@ -431,6 +479,55 @@ class GitGuardTest(unittest.TestCase):
     def test_merge_via_api(self):
         self.assertTrue(self.denied("gh api -X PUT repos/o/r/pulls/3/merge", self.main))
         self.assertFalse(self.denied("gh api repos/o/r/pulls/3", self.main))
+
+
+class SubmoduleCheckoutTest(unittest.TestCase):
+    """#34: pinning a submodule to a tag is not switching a branch."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.TemporaryDirectory()
+        root = Path(cls.tmp.name)
+        up = str(make_repo(root, "up", "main"))
+        for tag in ("v1.0.0", "v1.1.0"):
+            git(up, "commit", "-q", "--allow-empty", "-m", tag)
+            git(up, "tag", "-a", tag, "-m", tag)
+        git(up, "branch", "dev")
+        git(up, "tag", "-a", "dev-tag-and-branch", "-m", "t")
+        cls.proj = str(make_repo(root, "proj", "main"))
+        git(cls.proj, "-c", "protocol.file.allow=always", "submodule", "add", "-q", up, "sub")
+        git(cls.proj, "commit", "-qm", "add sub")
+        cls.sub = str(Path(cls.proj) / "sub")
+        git(cls.sub, "branch", "dev", "origin/dev")
+        git(cls.sub, "branch", "dev-tag-and-branch")
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.tmp.cleanup()
+
+    def test_pinning_a_submodule_to_a_tag_is_allowed(self):
+        for cmd in (
+            "git -C sub checkout v1.0.0",
+            "git -C sub checkout --detach v1.1.0",
+            "git -C sub checkout -q v1.0.0",
+            "cd sub && git checkout v1.1.0",
+            "git -C sub fetch --tags && git -C sub checkout v1.0.0",
+        ):
+            self.assertIsNone(check(cmd, self.proj), cmd)
+
+    def test_branches_in_a_submodule_are_still_denied(self):
+        for cmd in (
+            "git -C sub checkout dev",
+            "git -C sub checkout dev-tag-and-branch",
+            "git -C sub checkout -b x v1.0.0",
+            "git -C sub checkout -",
+            "git -C sub switch --detach v1.0.0",
+        ):
+            self.assertIsNotNone(check(cmd, self.proj), cmd)
+
+    def test_superproject_is_not_a_submodule(self):
+        self.assertIsNotNone(check("git checkout HEAD", self.proj))
+        self.assertIsNotNone(check("git checkout --detach HEAD", self.proj))
 
 
 class MaintainScriptTest(unittest.TestCase):
@@ -494,6 +591,8 @@ class LoopModeTest(unittest.TestCase):
             "gh workflow disable ci",
             "gh release create v9.9.9",
             "GH_TOKEN=x gh repo delete o/r --yes",
+            "/opt/homebrew/bin/gh secret set X",
+            "/usr/bin/env gh workflow disable ci",
             "gh",
         ):
             self.assertTrue(self.denied(cmd), cmd)
