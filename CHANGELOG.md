@@ -4,6 +4,18 @@
 
 每节分「不兼容」「新增」「修复」三类，没有的类别不写。「不兼容」里写清楚引用方要改什么。
 
+## 1.2.1 — 2026-11-24
+
+### 修复
+
+`jy-repo-constrain-check` 的 `check.py`：
+
+- 扫描跳过 git submodule 和仓库里嵌套的其他 git 仓库（子目录根上有 `.git`），以及 `.build`（SwiftPM）、`DerivedData`、`Pods`、`.gradle`。第 1 项不再统计 submodule 里的 ADR，第 8 项不再把依赖里的脚本算进来。没有 `adr/` 这类目录时，第 1 项写出 ADR 文件实际所在的目录（#28）。
+- 已安装的 hook 只认 git 会执行的 hook 名（`pre-commit`、`pre-push` 等），hooks 目录里的其他脚本和测试不再算 git hook（#27）。
+- mypy 的 `ignore_errors = true` 只在 `mypy.ini`、`setup.cfg`、`pyproject.toml` 里算放宽，代码里的 `shutil.rmtree(..., ignore_errors=True)` 不算（#27）。
+- 第 3 项认 `swift format` / `swift-format` 为 formatter，`--select ALL` 为严格信号；第 5 项认「不在主目录切分支」这类写法；第 7 项认 `swift test`、`xcodebuild test`、gradle、maven、`dotnet test`、`rspec`（#26）。
+- 第 8 项的 app 信号加上 Xcode 工程（`*.xcodeproj` / `*.xcworkspace`）、SwiftUI / UIKit / AppKit 入口、Android 的 `com.android.application`、Flutter 的 `pubspec.yaml`（#29）。
+
 ## 1.2.0 — 2026-11-24
 
 ### 新增
