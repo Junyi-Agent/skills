@@ -1,6 +1,6 @@
 # skills-repo
 
-Agent Skills（SKILL.md 格式）。每个 `skills/jy-*` 目录是一个 skill，`.claude/skills/` 下是指向它们的软链接，供本仓库内使用。新增 skill 放进 `skills/`，并在 `.claude/skills/` 加一条 `../../skills/<name>` 软链接、在 README 的 skill 表加一行（`scripts/repo_check.py check skills` 检查）。
+Agent Skills（SKILL.md 格式）。每个 `skills/jy-*` 目录是一个 skill，`.claude/skills/` 下是指向它们的软链接，供本仓库内使用。新增 skill 放进 `skills/`，并在 `.claude/skills/` 加一条 `../../skills/<name>` 软链接、在 README 的 skill 表加一行（`scripts/repo_check.py check skills` 检查）。只给本仓库用的内部 skill（目前是 `jy-repo-maintain`）直接放在 `.claude/skills/<name>/`，不是软链接，README 和安装说明里不提。
 
 ## 开发流程
 

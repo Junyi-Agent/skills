@@ -12,7 +12,7 @@ body:
     id: skill
     attributes:
       label: Skill
-      options: [jy-repo-review, jy-repo-quiz, jy-repo-constrain-check, jy-repo-codify, jy-repo-maintain, jy-skills-update, 不确定]
+      options: [jy-repo-review, jy-repo-quiz, jy-repo-constrain-check, jy-repo-codify, jy-skills-update, 不确定]
     validations:
       required: true
   - type: input

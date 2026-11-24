@@ -102,6 +102,25 @@ class SkillsTest(unittest.TestCase):
         [p] = check_skills(self.t.root)
         self.assertIn("应与目录名", p)
 
+    def test_internal_skill(self):
+        """A real directory with a SKILL.md in .claude/skills/ is an internal skill."""
+        self.t.skill("jy-a")
+        self.t.write(".claude/skills/jy-internal/SKILL.md", '---\nname: "jy-internal"\n---\n')
+        self.assertEqual(check_skills(self.t.root), [])
+
+    def test_internal_skill_name_mismatch(self):
+        self.t.skill("jy-a")
+        self.t.write(".claude/skills/jy-internal/SKILL.md", '---\nname: "jy-x"\n---\n')
+        [p] = check_skills(self.t.root)
+        self.assertIn(".claude/skills/jy-internal/SKILL.md 的 name", p)
+
+    def test_internal_skill_in_readme(self):
+        self.t.skill("jy-a")
+        self.t.write(".claude/skills/jy-internal/SKILL.md", '---\nname: "jy-internal"\n---\n')
+        self.t.write("README.md", (self.t.root / "README.md").read_text() + "jy-internal\n")
+        [p] = check_skills(self.t.root)
+        self.assertIn("README.md 提到了内部 skill jy-internal", p)
+
 
 class AdrsTest(unittest.TestCase):
     def setUp(self):
