@@ -4,6 +4,21 @@
 
 每节分「不兼容」「新增」「修复」三类，没有的类别不写。「不兼容」里写清楚引用方要改什么。
 
+## 2.1.0 — 2026-11-25
+
+### 新增
+
+- `jy-repo-constrain-check`：先识别仓库用了哪些语言，容易跨语言误判的规则只对这些语言生效（#30 第二步）。按语言生效的是：strict、weak、mypy 的 ignore_errors、CI 里识别 lint 和测试的匹配词、参数解析和 app 入口的代码信号，以及 CLI、库、app 的声明。工具名、扫描范围（跳过的目录、代码后缀）和 linter 配置文件不分语言。一种语言都没识别到时，行为和以前一样。输出第一行列出识别到的语言，`-o json` 多了 `languages` 字段。
+- 第 8 项的 CLI_DECL、LIB_DECL、APP_DECL、APP_PATHS、APP_GLOBS 也搬进了 `rules/<lang>/rules.json`。
+
+### 结果会变的仓库
+
+在本机 106 个仓库上和 2.0.3 对比：103 个输出不变，各项初判（PASS/WARN/FAIL/JUDGE）全部不变。只有 3 个仓库的证据或计数有变化，都是去掉了误报：
+
+- 一个 JS 站点：CI 里的「lint：有」原来是 `Copyright` 这个词命中了 `pyright`，现在是「lint：无」。
+- 一个 Python 工具仓库：第 8 项不再把 `.py` 注释里出现的 `UIApplicationMain` 当成 app 信号，类型初判从「两类都有」变成「工具类」。
+- 一个 Electron 仓库：不再把打包后的 JS 文件里的 `getopts` 算作参数解析。
+
 ## 2.0.3 — 2026-11-25
 
 ### 修复

@@ -1,4 +1,18 @@
 {
+  "detect": {
+    "files": [
+      "package.json",
+      "tsconfig.json"
+    ],
+    "suffixes": [
+      ".js",
+      ".mjs",
+      ".cjs",
+      ".ts",
+      ".tsx",
+      ".jsx"
+    ]
+  },
   "skip_dirs": [
     "node_modules",
     "dist",
@@ -56,5 +70,28 @@
     "\\bapp\\.listen\\(",
     "createRoot\\(",
     "ReactDOM\\.render"
+  ],
+  "cli_decl": [
+    [
+      "package.json",
+      "\"bin\"\\s*:"
+    ]
+  ],
+  "lib_decl": [
+    [
+      "package.json",
+      "\"(main|exports|module)\"\\s*:"
+    ]
+  ],
+  "app_decl": [
+    [
+      "package.json",
+      "\"(react|react-dom|vue|next|nuxt|svelte|@sveltejs/kit|@angular/core|express|koa|fastify|@nestjs/core|electron|react-native|expo)\"\\s*:"
+    ]
+  ],
+  "app_paths": [
+    "public/index.html",
+    "src/components",
+    "src/pages"
   ]
 }

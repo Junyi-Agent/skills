@@ -1,4 +1,18 @@
 {
+  "detect": {
+    "files": [
+      "build.gradle",
+      "build.gradle.kts",
+      "settings.gradle",
+      "settings.gradle.kts",
+      "pom.xml"
+    ],
+    "suffixes": [
+      ".kt",
+      ".kts",
+      ".java"
+    ]
+  },
   "skip_dirs": [
     ".gradle"
   ],
@@ -15,5 +29,26 @@
   "ci_test": [
     "\\bgradlew?\\b.*\\b(test|check)\\b",
     "\\bmvn\\b.*\\b(test|verify)\\b"
+  ],
+  "app_decl": [
+    [
+      "build.gradle",
+      "com\\.android\\.application"
+    ],
+    [
+      "build.gradle.kts",
+      "com\\.android\\.application"
+    ],
+    [
+      "app/build.gradle",
+      "com\\.android\\.application"
+    ],
+    [
+      "app/build.gradle.kts",
+      "com\\.android\\.application"
+    ]
+  ],
+  "app_paths": [
+    "android"
   ]
 }

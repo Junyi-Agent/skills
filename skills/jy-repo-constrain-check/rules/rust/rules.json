@@ -1,4 +1,12 @@
 {
+  "detect": {
+    "files": [
+      "Cargo.toml"
+    ],
+    "suffixes": [
+      ".rs"
+    ]
+  },
   "skip_dirs": [
     "target"
   ],
@@ -29,5 +37,17 @@
   ],
   "cli_code": [
     "\\bclap::"
+  ],
+  "cli_decl": [
+    [
+      "Cargo.toml",
+      "(?m)^\\[\\[bin\\]\\]"
+    ]
+  ],
+  "lib_decl": [
+    [
+      "Cargo.toml",
+      "(?m)^\\[lib\\]"
+    ]
   ]
 }
