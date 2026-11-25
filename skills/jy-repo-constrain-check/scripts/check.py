@@ -24,26 +24,29 @@ import subprocess
 import sys
 from pathlib import Path
 
-SKIP_DIRS = {
-    ".git",
-    "node_modules",
-    ".venv",
-    "venv",
-    "vendor",
-    "dist",
-    "build",
-    "target",
-    "__pycache__",
-    ".tox",
-    "third_party",
-    ".mypy_cache",
-    ".ruff_cache",
-    ".next",
-    ".build",  # SwiftPM checkouts and build products
-    "DerivedData",
-    "Pods",
-    ".gradle",
-}
+RULES_DIR = Path(__file__).resolve().parent.parent / "rules"
+# Merge order: list fields keep it (evidence order depends on it), "common" goes last.
+LANGS = ["python", "javascript", "go", "rust", "swift", "kotlin", "other", "common"]
+
+
+def load_rules(rules_dir: Path = RULES_DIR, langs: list[str] = LANGS) -> dict[str, list]:
+    """Concatenate each field of rules/<lang>/rules.json over langs, in order."""
+    merged: dict[str, list] = {}
+    for lang in langs:
+        data = json.loads((rules_dir / lang / "rules.json").read_text(encoding="utf-8"))
+        for key, value in data.items():
+            merged.setdefault(key, []).extend(value)
+    return merged
+
+
+def alternation(parts: list[str], prefix: str = "(?i)", wrap: bool = False) -> re.Pattern:
+    """One regex matching any of parts; wrap puts them in a \\b(...)\\b capture group."""
+    body = "|".join(dict.fromkeys(parts))
+    return re.compile(prefix + (rf"\b({body})\b" if wrap else body))
+
+
+RULES = load_rules()
+SKIP_DIRS = set(RULES["skip_dirs"])
 MAX_DEPTH = 4
 MAX_FILE = 200_000
 
@@ -389,63 +392,17 @@ def check_git_precommit(root: Path, hooks: list[Path]) -> Section:
     return s
 
 
-FORMATTERS = re.compile(
-    r"(?i)\b(black|ruff-format|ruff format|isort|autopep8|yapf|prettier|biome[- ]format|"
-    r"gofmt|goimports|gofumpt|rustfmt|cargo fmt|clang-format|shfmt|stylua|ktlint|swiftformat|swift[- ]format|"
-    r"terraform fmt|taplo|end-of-file-fixer|trailing-whitespace)\b"
-)
-LINTERS = re.compile(
-    r"(?i)\b(ruff(?![- ]format)|flake8|pylint|mypy|pyright|basedpyright|eslint|biome(?![- ]format)|"
-    r"golangci-lint|go vet|staticcheck|clippy|shellcheck|hadolint|markdownlint|tsc|stylelint|"
-    r"rubocop|ktlint|swiftlint|tflint|yamllint|actionlint)\b"
-)
+FORMATTERS = alternation(RULES["formatters"], wrap=True)
+LINTERS = alternation(RULES["linters"], wrap=True)
 # Evidence only: the model reads the snippet and decides. shellcheck's `--severity` is not
 # listed: `style` is its default and every other level reports less.
-STRICT = re.compile(
-    r"(?i)--strict|strict\s*=\s*true|typeCheckingMode\s*[:=]\s*\"?strict|"
-    r"^\s*(extend-)?select\s*=\s*\[|--select[\"']?(?:[= ]|,\s*)[\"']?ALL\b|--enable[= ]all|(^|\s)-o\s*all\b|"
-    r"--max-warnings[= ]0|-D\s*warnings|--deny[= ]warnings|"
-    r"disallow_untyped_defs|warn_unused_ignores|--exit-non-zero-on-fix|\"strict\"\s*:\s*true|"
-    r"--fail-on|--error|"
-    r"enable-all:\s*true|default:\s*all|require-explanation:\s*true|require-specific:\s*true|"
-    r"\"recommended\"\s*:\s*true|plugin:@typescript-eslint/strict|strictTypeChecked"
-)
+STRICT = alternation(RULES["strict"])
 # `|| true` only counts when it follows a check command on the same line
-WEAK = re.compile(
-    r"(?i)--exit-zero|(pre-commit|lint|ruff|eslint|flake8|mypy|pyright|pylint|clippy|golangci|"
-    r"shellcheck|pytest|test)[^|\n]*\|\|\s*true|continue-on-error:\s*true|--max-warnings[= ]-1|"
-    r"--disable-error-code|SKIP="
-)
-# mypy's `ignore_errors = true` only weakens in a mypy config; in code it is shutil.rmtree's flag
-MYPY_CONFIGS = {"mypy.ini", ".mypy.ini", "setup.cfg", "pyproject.toml"}
-MYPY_WEAK = re.compile(r"(?i)^\s*ignore_errors\s*=\s*true")
-LINT_CONFIGS = [
-    "pyproject.toml",
-    "ruff.toml",
-    ".ruff.toml",
-    "setup.cfg",
-    "mypy.ini",
-    ".mypy.ini",
-    "pyrightconfig.json",
-    ".flake8",
-    ".pylintrc",
-    "tsconfig.json",
-    ".eslintrc",
-    ".eslintrc.js",
-    ".eslintrc.json",
-    ".eslintrc.cjs",
-    ".eslintrc.yml",
-    "eslint.config.js",
-    "eslint.config.mjs",
-    "eslint.config.cjs",
-    "biome.json",
-    ".golangci.yml",
-    ".golangci.yaml",
-    "clippy.toml",
-    ".clippy.toml",
-    "Cargo.toml",
-    ".shellcheckrc",
-]
+WEAK = alternation(RULES["weak"])
+# (files, pattern): weakening only inside these top-level config files, e.g. mypy's
+# `ignore_errors = true`, which in code is shutil.rmtree's flag
+WEAK_IN_CONFIG = [(set(w["files"]), re.compile(w["pattern"])) for w in RULES["weak_in_config"]]
+LINT_CONFIGS = list(dict.fromkeys(RULES["lint_configs"]))
 
 
 def hook_texts(root: Path, hooks: list[Path]) -> list[Path]:
@@ -538,8 +495,9 @@ def check_fmt_lint(root: Path, hooks: list[Path]) -> Section:
     for f in files + [root / c for c in LINT_CONFIGS if (root / c).is_file()]:
         strict += grep(root, f, STRICT, limit=4)
         weak += grep(root, f, WEAK, limit=4)
-        if f.parent == root and f.name in MYPY_CONFIGS:
-            weak += grep(root, f, MYPY_WEAK, limit=4)
+        for names, pattern in WEAK_IN_CONFIG:
+            if f.parent == root and f.name in names:
+                weak += grep(root, f, pattern, limit=4)
     s.evidence += [f"严格：{e}" for e in strict[:6]] + [f"放宽：{e}" for e in weak[:6]]
 
     if (not fmts or not lints) and missing:
@@ -809,14 +767,8 @@ CI_PATHS = [
     "cloudbuild.yml",
 ]
 CI_PRECOMMIT = re.compile(r"(?i)pre-commit run|pre-commit/action")
-CI_LINT = re.compile(
-    r"(?i)pre-commit run|pre-commit/action|\blint\b|ruff|eslint|flake8|mypy|pyright|clippy|golangci|shellcheck|biome|fmt --check|--check\b"
-)
-CI_TEST = re.compile(
-    r"(?i)pytest|unittest|\btest_\w+\.py\b|\w+_test\.py\b|\b(npm|pnpm|yarn|bun) (run )?test|cargo test|go test|\bmake test|ctest|jest|vitest|tox\b|nox\b|"
-    r"\bswift test\b|\bxcodebuild\b.*\btest(-without-building)?\b|\bgradlew?\b.*\b(test|check)\b|"
-    r"\bmvn\b.*\b(test|verify)\b|\bdotnet test\b|\brspec\b"
-)
+CI_LINT = alternation(RULES["ci_lint"])
+CI_TEST = alternation(RULES["ci_test"])
 CI_DEPLOY = re.compile(
     r"(?i)deploy|release|publish|docker push|gh release|twine upload|npm publish|helm upgrade|kubectl apply"
 )
@@ -988,10 +940,7 @@ def branch_protection(root: Path) -> str:
 
 # ---------- 8. Unix philosophy (tool repos only) ----------
 
-CODE_SUFFIXES = {
-    ".py", ".js", ".mjs", ".cjs", ".ts", ".go", ".rs", ".sh", ".bash", ".rb",
-    ".java", ".kt", ".swift", ".c", ".cc", ".cpp",
-}  # fmt: skip
+CODE_SUFFIXES = set(RULES["code_suffixes"])
 MAX_CODE_FILES = 400
 # (file, pattern): a declared command-line entry point
 CLI_DECL = [
@@ -1028,14 +977,9 @@ APP_DECL = [
 APP_PATHS = ["android", "ios", "public/index.html", "src/components", "src/pages", "app/views"]
 # Xcode projects at the top level or one level down (Pods/ etc. are skipped)
 APP_GLOBS = ["*.xcodeproj", "*.xcworkspace", "*/*.xcodeproj", "*/*.xcworkspace"]
-CLI_CODE = re.compile(
-    r"\bargparse\b|\bimport click\b|\bfrom click\b|\btyper\b|\bclap::|cobra\.Command|"
-    r"\bflag\.Parse\(|\bcommander\b|\byargs\b|\bOptionParser\b|\bgetopts\b"
-)
-APP_CODE = re.compile(
-    r"\bFlask\(|\bFastAPI\(|\bapp\.listen\(|http\.ListenAndServe|createRoot\(|ReactDOM\.render|"
-    r"\bstruct\s+\w+\s*:\s*App\b|\bUIApplicationMain\b|\bNSApplicationMain\b"  # SwiftUI, UIKit, AppKit
-)
+CLI_CODE = alternation(RULES["cli_code"], prefix="")
+APP_CODE = alternation(RULES["app_code"], prefix="")
+
 UNIX_SIGNALS = [
     ("读 stdin", re.compile(r"sys\.stdin|process\.stdin|os\.Stdin|io::stdin|\bfileinput\b|\bread -r\b")),
     ("写 stderr", re.compile(r"sys\.stderr|console\.error|os\.Stderr|eprintln!|>&2")),

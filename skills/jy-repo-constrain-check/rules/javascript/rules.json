@@ -1,0 +1,60 @@
+{
+  "skip_dirs": [
+    "node_modules",
+    "dist",
+    ".next"
+  ],
+  "formatters": [
+    "prettier",
+    "biome[- ]format"
+  ],
+  "linters": [
+    "eslint",
+    "biome(?![- ]format)",
+    "tsc",
+    "stylelint"
+  ],
+  "strict": [
+    "--max-warnings[= ]0",
+    "\\\"strict\\\"\\s*:\\s*true",
+    "\\\"recommended\\\"\\s*:\\s*true",
+    "plugin:@typescript-eslint/strict",
+    "strictTypeChecked"
+  ],
+  "lint_configs": [
+    "tsconfig.json",
+    ".eslintrc",
+    ".eslintrc.js",
+    ".eslintrc.json",
+    ".eslintrc.cjs",
+    ".eslintrc.yml",
+    "eslint.config.js",
+    "eslint.config.mjs",
+    "eslint.config.cjs",
+    "biome.json"
+  ],
+  "code_suffixes": [
+    ".js",
+    ".mjs",
+    ".cjs",
+    ".ts"
+  ],
+  "ci_lint": [
+    "eslint",
+    "biome"
+  ],
+  "ci_test": [
+    "\\b(npm|pnpm|yarn|bun) (run )?test",
+    "jest",
+    "vitest"
+  ],
+  "cli_code": [
+    "\\bcommander\\b",
+    "\\byargs\\b"
+  ],
+  "app_code": [
+    "\\bapp\\.listen\\(",
+    "createRoot\\(",
+    "ReactDOM\\.render"
+  ]
+}

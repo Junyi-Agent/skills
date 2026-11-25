@@ -1,0 +1,41 @@
+{
+  "skip_dirs": [
+    "vendor"
+  ],
+  "formatters": [
+    "gofmt",
+    "goimports",
+    "gofumpt"
+  ],
+  "linters": [
+    "golangci-lint",
+    "go vet",
+    "staticcheck"
+  ],
+  "strict": [
+    "enable-all:\\s*true",
+    "default:\\s*all",
+    "require-explanation:\\s*true",
+    "require-specific:\\s*true"
+  ],
+  "lint_configs": [
+    ".golangci.yml",
+    ".golangci.yaml"
+  ],
+  "code_suffixes": [
+    ".go"
+  ],
+  "ci_lint": [
+    "golangci"
+  ],
+  "ci_test": [
+    "go test"
+  ],
+  "cli_code": [
+    "cobra\\.Command",
+    "\\bflag\\.Parse\\("
+  ],
+  "app_code": [
+    "http\\.ListenAndServe"
+  ]
+}

@@ -1,0 +1,59 @@
+{
+  "skip_dirs": [
+    ".git",
+    "build",
+    "third_party"
+  ],
+  "formatters": [
+    "shfmt",
+    "terraform fmt",
+    "taplo",
+    "end-of-file-fixer",
+    "trailing-whitespace"
+  ],
+  "linters": [
+    "shellcheck",
+    "hadolint",
+    "markdownlint",
+    "tflint",
+    "yamllint",
+    "actionlint"
+  ],
+  "strict": [
+    "--strict",
+    "strict\\s*=\\s*true",
+    "--enable[= ]all",
+    "(^|\\s)-o\\s*all\\b",
+    "--fail-on",
+    "--error"
+  ],
+  "weak": [
+    "--exit-zero",
+    "(pre-commit|lint|ruff|eslint|flake8|mypy|pyright|pylint|clippy|golangci|shellcheck|pytest|test)[^|\\n]*\\|\\|\\s*true",
+    "continue-on-error:\\s*true",
+    "--max-warnings[= ]-1",
+    "SKIP="
+  ],
+  "lint_configs": [
+    ".shellcheckrc"
+  ],
+  "code_suffixes": [
+    ".sh",
+    ".bash"
+  ],
+  "ci_lint": [
+    "pre-commit run",
+    "pre-commit/action",
+    "\\blint\\b",
+    "shellcheck",
+    "fmt --check",
+    "--check\\b"
+  ],
+  "ci_test": [
+    "\\bmake test",
+    "ctest"
+  ],
+  "cli_code": [
+    "\\bgetopts\\b"
+  ]
+}

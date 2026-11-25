@@ -4,6 +4,12 @@
 
 每节分「不兼容」「新增」「修复」三类，没有的类别不写。「不兼容」里写清楚引用方要改什么。
 
+## 2.0.3 — 2026-11-25
+
+### 修复
+
+- `jy-repo-constrain-check`：各语言的识别规则从 `scripts/check.py` 搬到 `rules/<lang>/rules.json`，分 python、javascript、go、rust、swift、kotlin、other、common 八个目录（#30 第一步）。输出不变：对本机 106 个仓库，用 `-o json` 跑新旧两版，结果逐字节相同。第 8 项按文件声明的几个列表暂时还留在 `check.py`。引用方不用改什么。
+
 ## 2.0.1 — 2026-11-24
 
 ### 修复

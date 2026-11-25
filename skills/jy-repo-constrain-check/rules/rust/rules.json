@@ -1,0 +1,33 @@
+{
+  "skip_dirs": [
+    "target"
+  ],
+  "formatters": [
+    "rustfmt",
+    "cargo fmt"
+  ],
+  "linters": [
+    "clippy"
+  ],
+  "strict": [
+    "-D\\s*warnings",
+    "--deny[= ]warnings"
+  ],
+  "lint_configs": [
+    "clippy.toml",
+    ".clippy.toml",
+    "Cargo.toml"
+  ],
+  "code_suffixes": [
+    ".rs"
+  ],
+  "ci_lint": [
+    "clippy"
+  ],
+  "ci_test": [
+    "cargo test"
+  ],
+  "cli_code": [
+    "\\bclap::"
+  ]
+}
