@@ -15,9 +15,9 @@ Agent Skills（SKILL.md 格式）。每个 `skills/jy-*` 目录是一个 skill�
 
 push 时 pre-push hook 跑 `scripts/review_gate.py`：3 个 Claude 分别从正确性、skill 质量、流程与安全审查 `origin/main` 之后的改动，≥2 个同意才放行。被拒时按输出里的 blocking issues 改完再 push。需要本机装好并登录 `claude` CLI。见 [[docs/adr/0002-pre-push-review-gate]]。
 
-## 维护 loop
+## 维护
 
-launchd 每 6 小时以 `JY_MAINTAIN_LOOP=1 claude -p /jy-repo-maintain` 跑一轮（[[docs/adr/0006-issue-maintain-loop]]）。loop 模式下 `git_guard.py` 只放行部分 gh 命令，不让 loop 加 `accepted` / `approved` 标签，合并前先跑 `maintain.py check pr`。改到 `.claude/maintain.json` 里 `guardrails` 列出的文件，或升了 X 版本的 PR，由人合并。
+定时维护 loop 已停用，由 jy-dashboard 的「skills-repo 维护」项目组人工接手（[[docs/adr/0007-maintain-loop-stopped]]，取代 [[docs/adr/0006-issue-maintain-loop]]）。issue 打了 `accepted` 才处理；大改动先在 issue 里写方案，确认后再开工。`/jy-repo-maintain` 仍可手动跑一轮：带 `JY_MAINTAIN_LOOP=1` 时 `git_guard.py` 只放行部分 gh 命令，不让加 `accepted` / `approved` 标签，合并前先跑 `maintain.py check pr`。
 
 ## 本地检查
 
