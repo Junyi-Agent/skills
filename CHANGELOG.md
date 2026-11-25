@@ -9,6 +9,11 @@
 ### 修复
 
 - `jy-repo-constrain-check`：各语言的识别规则从 `scripts/check.py` 搬到 `rules/<lang>/rules.json`，分 python、javascript、go、rust、swift、kotlin、other、common 八个目录（#30 第一步）。输出不变：对本机 106 个仓库，用 `-o json` 跑新旧两版，结果逐字节相同。第 8 项按文件声明的几个列表暂时还留在 `check.py`。引用方不用改什么。
+## 2.0.2 — 2026-11-25
+
+### 修复
+
+- 定时维护 loop 已停用，文档还写着 launchd 每 6 小时跑一轮。新增 ADR 0007：停用 loop，改由维护项目组人工接手；ADR 0006 状态改成「已取代（见 0007）」，正文不改；CLAUDE.md 的「维护 loop」一节改成「维护」。引用方不用改什么。
 
 ## 2.0.1 — 2026-11-24
 
