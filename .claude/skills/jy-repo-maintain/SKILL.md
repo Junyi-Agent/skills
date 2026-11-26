@@ -32,6 +32,8 @@ description: "按 issue 维护当前仓库的一轮 loop：分诊 issue、修 bu
   - 失败：到 worktree 里修，修好后 push。
   - 进行中：留到下一轮。
 
+然后清理已合并的分支。`git worktree list` 里每个 feature 分支，用 `gh pr list --state merged --head <branch> --json number,headRefOid` 找它的 PR。PR 已合并、且 `headRefOid` 等于 `git rev-parse <branch>` 时，依次执行 `git worktree remove <路径>`、`git branch -D <branch>`、远端分支还在时 `git push origin --delete <branch>`，最后执行 `git worktree prune`。head 和本地分支不相等时，说明有没 push 的提交，不删，写进汇报。人合并的 PR 也照这样清理。
+
 ## 2. 读 issue
 
 `M get issues -o json`。对每个 `actionable` 的 issue，用 `gh issue view <n> --comments` 看正文和评论，判断上次 loop 评论之后有没有人的新回复：
