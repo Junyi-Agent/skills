@@ -45,8 +45,64 @@ def alternation(parts: list[str], prefix: str = "(?i)", wrap: bool = False) -> r
     return re.compile(prefix + (rf"\b({body})\b" if wrap else body))
 
 
-RULES = load_rules()
-SKIP_DIRS = set(RULES["skip_dirs"])
+def detect_languages(root: Path) -> list[str]:
+    """Languages (other than common) whose detect files, globs or suffixes occur in root."""
+    rules = {
+        lang: json.loads((RULES_DIR / lang / "rules.json").read_text(encoding="utf-8"))
+        for lang in LANGS
+    }
+    suffixes = {p.suffix for p in walk(root, max_depth=6)}  # as deep as code_files()
+    found = []
+    for lang in LANGS[:-1]:
+        d = rules[lang].get("detect", {})
+        if (
+            any((root / f).is_file() for f in d.get("files", []))
+            or any(next(root.glob(g), None) for g in d.get("globs", []))
+            or suffixes.intersection(d.get("suffixes", []))
+        ):
+            found.append(lang)
+    return found
+
+
+def use_rules(langs: list[str]) -> None:
+    """Rebind the rule globals to the merge of langs (plus common, always last)."""
+    global RULES, SKIP_DIRS, FORMATTERS, LINTERS, STRICT, WEAK, WEAK_IN_CONFIG, LINT_CONFIGS
+    global CI_LINT, CI_TEST, CODE_SUFFIXES, CLI_DECL, LIB_DECL, APP_DECL, APP_PATHS, APP_GLOBS
+    global CLI_CODE, APP_CODE
+    # Scan scope and tool names stay on for every language: turning them off only hides
+    # real things (node_modules gets scanned, a clang-format hook is not seen).
+    every = load_rules()
+    SKIP_DIRS = set(every["skip_dirs"])
+    CODE_SUFFIXES = set(every["code_suffixes"])
+    FORMATTERS = alternation(every["formatters"], wrap=True)
+    LINTERS = alternation(every["linters"], wrap=True)
+    LINT_CONFIGS = list(dict.fromkeys(every["lint_configs"]))
+    # Patterns that misfire on another language's code or config follow the detected languages.
+    RULES = load_rules(langs=[lang for lang in LANGS if lang in langs or lang == "common"])
+    # Evidence only: the model reads the snippet and decides. shellcheck's `--severity` is not
+    # listed: `style` is its default and every other level reports less.
+    STRICT = alternation(RULES["strict"])
+    # `|| true` only counts when it follows a check command on the same line
+    WEAK = alternation(RULES["weak"])
+    # (files, pattern): weakening only inside these top-level config files, e.g. mypy's
+    # `ignore_errors = true`, which in code is shutil.rmtree's flag
+    WEAK_IN_CONFIG = [
+        (set(w["files"]), re.compile(w["pattern"])) for w in RULES.get("weak_in_config", [])
+    ]
+    CI_LINT = alternation(RULES["ci_lint"])
+    CI_TEST = alternation(RULES["ci_test"])
+    # (file, pattern): a declared command-line entry point / importable package / app or service
+    CLI_DECL = [tuple(d) for d in RULES.get("cli_decl", [])]
+    LIB_DECL = [tuple(d) for d in RULES.get("lib_decl", [])]
+    APP_DECL = [tuple(d) for d in RULES.get("app_decl", [])]
+    APP_PATHS = list(dict.fromkeys(RULES.get("app_paths", [])))
+    # Xcode projects at the top level or one level down (Pods/ etc. are skipped)
+    APP_GLOBS = list(dict.fromkeys(RULES.get("app_globs", [])))
+    CLI_CODE = alternation(RULES.get("cli_code", []), prefix="")
+    APP_CODE = alternation(RULES.get("app_code", []), prefix="")
+
+
+use_rules(LANGS)
 MAX_DEPTH = 4
 MAX_FILE = 200_000
 
@@ -390,19 +446,6 @@ def check_git_precommit(root: Path, hooks: list[Path]) -> Section:
         s.verdict = "WARN"
         s.facts.append("有 hook 配置但本机没有安装 pre-commit hook")
     return s
-
-
-FORMATTERS = alternation(RULES["formatters"], wrap=True)
-LINTERS = alternation(RULES["linters"], wrap=True)
-# Evidence only: the model reads the snippet and decides. shellcheck's `--severity` is not
-# listed: `style` is its default and every other level reports less.
-STRICT = alternation(RULES["strict"])
-# `|| true` only counts when it follows a check command on the same line
-WEAK = alternation(RULES["weak"])
-# (files, pattern): weakening only inside these top-level config files, e.g. mypy's
-# `ignore_errors = true`, which in code is shutil.rmtree's flag
-WEAK_IN_CONFIG = [(set(w["files"]), re.compile(w["pattern"])) for w in RULES["weak_in_config"]]
-LINT_CONFIGS = list(dict.fromkeys(RULES["lint_configs"]))
 
 
 def hook_texts(root: Path, hooks: list[Path]) -> list[Path]:
@@ -767,8 +810,6 @@ CI_PATHS = [
     "cloudbuild.yml",
 ]
 CI_PRECOMMIT = re.compile(r"(?i)pre-commit run|pre-commit/action")
-CI_LINT = alternation(RULES["ci_lint"])
-CI_TEST = alternation(RULES["ci_test"])
 CI_DEPLOY = re.compile(
     r"(?i)deploy|release|publish|docker push|gh release|twine upload|npm publish|helm upgrade|kubectl apply"
 )
@@ -940,45 +981,7 @@ def branch_protection(root: Path) -> str:
 
 # ---------- 8. Unix philosophy (tool repos only) ----------
 
-CODE_SUFFIXES = set(RULES["code_suffixes"])
 MAX_CODE_FILES = 400
-# (file, pattern): a declared command-line entry point
-CLI_DECL = [
-    ("pyproject.toml", r"(?m)^\[(project|tool\.poetry)\.scripts\]"),
-    ("setup.py", r"console_scripts"),
-    ("setup.cfg", r"console_scripts"),
-    ("package.json", r'"bin"\s*:'),
-    ("Cargo.toml", r"(?m)^\[\[bin\]\]"),
-]
-# (file, pattern): a package meant to be imported by other programs
-LIB_DECL = [
-    ("pyproject.toml", r"(?m)^\[project\]|^\[tool\.poetry\]"),
-    ("setup.py", r"setup\("),
-    ("package.json", r'"(main|exports|module)"\s*:'),
-    ("Cargo.toml", r"(?m)^\[lib\]"),
-    ("go.mod", r"(?m)^module\s"),
-]
-ANDROID_GRADLE = ["build.gradle", "build.gradle.kts", "app/build.gradle", "app/build.gradle.kts"]
-# (file, pattern): a user-facing app or long-running service
-APP_DECL = [
-    (
-        "package.json",
-        r'"(react|react-dom|vue|next|nuxt|svelte|@sveltejs/kit|@angular/core|'
-        r'express|koa|fastify|@nestjs/core|electron|react-native|expo)"\s*:',
-    ),
-    ("pyproject.toml", r"(?i)\b(django|flask|fastapi|streamlit|gradio)\b"),
-    ("requirements.txt", r"(?im)^(django|flask|fastapi|streamlit|gradio)\b"),
-    ("Gemfile", r"\brails\b"),
-    ("Dockerfile", r"(?m)^\s*EXPOSE\s"),
-    ("Procfile", r"(?m)^web:"),
-    *[(f, r"com\.android\.application") for f in ANDROID_GRADLE],
-    ("pubspec.yaml", r"(?m)^\s*sdk:\s*flutter\b"),
-]
-APP_PATHS = ["android", "ios", "public/index.html", "src/components", "src/pages", "app/views"]
-# Xcode projects at the top level or one level down (Pods/ etc. are skipped)
-APP_GLOBS = ["*.xcodeproj", "*.xcworkspace", "*/*.xcodeproj", "*/*.xcworkspace"]
-CLI_CODE = alternation(RULES["cli_code"], prefix="")
-APP_CODE = alternation(RULES["app_code"], prefix="")
 
 UNIX_SIGNALS = [
     ("读 stdin", re.compile(r"sys\.stdin|process\.stdin|os\.Stdin|io::stdin|\bfileinput\b|\bread -r\b")),
@@ -1162,6 +1165,9 @@ def main() -> None:
     if top:
         root = Path(top)
     hooks = installed_hooks(hooks_dir(root)) if top else []
+    langs = detect_languages(root)
+    # Nothing recognised: keep every language's rules, as before per-language rules existed
+    use_rules(langs or LANGS)
 
     run = {
         1: lambda: check_adr(root),
@@ -1177,11 +1183,12 @@ def main() -> None:
     sections = [run[n]() for n in sorted(set(args.names or CHECKS))]
 
     if args.output == "json":
-        out = {"root": str(root), "sections": [s.to_dict() for s in sections]}
+        out = {"root": str(root), "languages": langs, "sections": [s.to_dict() for s in sections]}
         print(json.dumps(out, ensure_ascii=False, indent=2))
         return
 
     print(f"# 流程约束检查：{root}\n")
+    print("识别到的语言：" + (", ".join(langs) if langs else "无（使用全部语言的规则）") + "\n")
     print("| # | 检查项 | 初判 |\n|---|---|---|")
     for s in sections:
         print(f"| {s.num} | {s.title} | {s.verdict} |")

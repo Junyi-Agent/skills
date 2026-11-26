@@ -19,6 +19,8 @@ python3 <本 skill 目录>/scripts/check.py get checks --repo <repo 路径>
 - JUDGE：找到了相关内容，但是否合格要读懂语义，由你判断
 - N/A：不适用（目前只有第 8 项会出现，表示脚本初判为 app 类 repo）
 
+输出第一行是识别到的语言（`-o json` 里是 `languages` 字段）。容易跨语言误判的规则只对这些语言生效，没识别到任何语言时全部生效，见 `rules/README.md`。
+
 默认会用 `gh api` 查一次 GitHub 分支保护（6 秒超时）；离线或不想访问网络时加 `--no-remote`。加 `-o json` 时输出同样内容的 JSON（供其他程序处理）；参数错误、路径不存在或不是目录时退出码为 2。
 
 ## 第 2 步：判定 JUDGE 项

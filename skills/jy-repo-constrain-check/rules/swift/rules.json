@@ -1,4 +1,18 @@
 {
+  "detect": {
+    "files": [
+      "Package.swift"
+    ],
+    "globs": [
+      "*.xcodeproj",
+      "*.xcworkspace",
+      "*/*.xcodeproj",
+      "*/*.xcworkspace"
+    ],
+    "suffixes": [
+      ".swift"
+    ]
+  },
   "skip_dirs": [
     ".build",
     "DerivedData",
@@ -22,5 +36,14 @@
     "\\bstruct\\s+\\w+\\s*:\\s*App\\b",
     "\\bUIApplicationMain\\b",
     "\\bNSApplicationMain\\b"
+  ],
+  "app_paths": [
+    "ios"
+  ],
+  "app_globs": [
+    "*.xcodeproj",
+    "*.xcworkspace",
+    "*/*.xcodeproj",
+    "*/*.xcworkspace"
   ]
 }
