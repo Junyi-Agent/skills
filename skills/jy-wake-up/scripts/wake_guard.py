@@ -10,6 +10,9 @@ turn, or write a line「不开工原因：…」saying why not. This hook blocks
   3. a sent IM message or a reply text promises later work (接下来 / 下一步 / 准备 / 先…再 ...);
   4. nothing in them says「不开工原因：」.
 
+It also blocks a woken turn that sent no IM message (no mcp__im__send_* call) and has no line
+「无需回复：…」: text only in the final reply is not delivered, nobody is notified.
+
 Known gaps: the promise words are a keyword match (misses and false hits), and any one
 command that does not mention HANDOFF.md counts as work, read-only or not. It stops the plain
 "reply and end the turn" case; a server-side check in jy-dashboard is the stronger fix.
@@ -27,11 +30,18 @@ from pathlib import Path
 WAKE = "你被唤醒了"
 PROMISE = re.compile(r"接下来|下一步|准备|稍后|下一轮|会去|马上|先.{0,30}再")
 REASON = re.compile(r"不开工原因\s*[:：]")
+NO_REPLY = re.compile(r"无需回复\s*[:：]")
 TALK_TOOLS = re.compile(r"^(mcp__im__\w+|ToolSearch|Read|Grep|Glob)$")
 HANDOFF = "HANDOFF.md"
 MESSAGE = (
     "消息里有派给你的活，但这一轮只回复了、没有开工（jy-wake-up skill）。"
     "现在就开始做；确实不能开工时，在回复里写一行「不开工原因：…」，说明在等什么、等谁。"
+)
+
+NO_SEND = (
+    "这一轮是被 IM 唤醒的，但没有用 IM 工具（send_message / send_dm）回复，"
+    "只写在最终文本里的话对方收不到（jy-wake-up skill）。用 IM 工具回复；"
+    "确实不需要回复时，写一行「无需回复：…」说明原因。"
 )
 
 
@@ -79,18 +89,18 @@ def check(transcript: Path) -> str | None:
         return None
     out = [b for r in rows if r["type"] == "assistant" for b in blocks(r)]
     calls = [b for b in out if b.get("type") == "tool_use"]
-    if any(is_work(c) for c in calls):
-        return None
-    said = [
+    sent = [
         c.get("input", {}).get("text", "")
         for c in calls
         if c.get("name", "").startswith("mcp__im__send")
     ]
-    said += [b.get("text", "") for b in out if b.get("type") == "text"]
-    text = "\n".join(said)
-    if REASON.search(text) or not PROMISE.search(text):
-        return None
-    return MESSAGE
+    final = [b.get("text", "") for b in out if b.get("type") == "text"]
+    text = "\n".join(sent + final)
+    if not any(is_work(c) for c in calls) and PROMISE.search(text) and not REASON.search(text):
+        return MESSAGE
+    if not sent and not NO_REPLY.search(text):
+        return NO_SEND
+    return None
 
 
 def main() -> None:

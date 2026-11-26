@@ -40,10 +40,10 @@ def result():
     }
 
 
-def tool(name, **args):
+def tool(tool_name, **args):
     return {
         "type": "assistant",
-        "message": {"content": [{"type": "tool_use", "name": name, "input": args}]},
+        "message": {"content": [{"type": "tool_use", "name": tool_name, "input": args}]},
     }
 
 
@@ -139,6 +139,31 @@ class WakeGuardTest(unittest.TestCase):
     def test_only_the_last_turn_counts(self):
         earlier = [user(WAKE), tool("Bash", command="gh pr list"), result(), say("做完了")]
         self.assertEqual(self.check(earlier + reply_only()), wake_guard.MESSAGE)
+
+    def test_reply_only_in_final_text_is_blocked(self):
+        rows = [user(WAKE), tool("Bash", command="gh pr list"), result(), say("做完了，PR 已开。")]
+        self.assertEqual(self.check(rows), wake_guard.NO_SEND)
+
+    def test_sent_reply_after_work_lets_it_end(self):
+        rows = [
+            user(WAKE),
+            tool("Bash", command="gh pr list"),
+            result(),
+            tool("mcp__im__send_dm", name="上级", text="做完了，PR 已开。"),
+            result(),
+            say("做完了，PR 已开。"),
+        ]
+        self.assertIsNone(self.check(rows))
+
+    def test_no_reply_needed_line_lets_it_end(self):
+        for line in ("无需回复：对方只是确认收到。", "无需回复: 只是致谢"):
+            self.assertIsNone(self.check([user(WAKE), say(line)]))
+
+    def test_no_reply_needed_does_not_excuse_a_promise(self):
+        rows = reply_only()
+        rows[3] = say("无需回复：只是确认")
+        rows[-1] = say("无需回复：只是确认。下一步：盘点积压。")
+        self.assertEqual(self.check(rows), wake_guard.MESSAGE)
 
     def test_hook_io(self):
         p = write(reply_only())
