@@ -83,6 +83,12 @@ repos:
         language: system
         files: ^skills/jy-skills-update/scripts/
         pass_filenames: false
+      - id: wake-guard-tests
+        name: jy-wake-up hook tests
+        entry: python3 skills/jy-wake-up/scripts/test_wake_guard.py
+        language: system
+        files: ^(skills/jy-wake-up/scripts/|\.claude/settings\.json$)
+        pass_filenames: false
       - id: release-tests
         name: release script tests
         entry: python3 scripts/test_release.py

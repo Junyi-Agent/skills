@@ -9,6 +9,7 @@
 | [`jy-repo-constrain-check`](skills/jy-repo-constrain-check) | 检查 repo 的开发流程约束；工具类 repo 还查是否符合 Unix 设计哲学 |
 | [`jy-repo-codify`](skills/jy-repo-codify) | 收集仓库里犯过的错和纠正，固化成 lint、测试、check 脚本等可强制执行的约束 |
 | [`jy-skills-update`](skills/jy-skills-update) | 给引用本仓库的项目用：检查更新、回顾使用记录、把问题整理成 issue 提回来 |
+| [`jy-wake-up`](skills/jy-wake-up) | 被 IM 唤醒时：派给自己的活同一轮开工，不开工就写明原因；附带 Stop hook 检查 |
 
 ## 安装
 
