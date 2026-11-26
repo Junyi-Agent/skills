@@ -1,0 +1,19 @@
+{
+  "skip_dirs": [
+    ".gradle"
+  ],
+  "formatters": [
+    "ktlint"
+  ],
+  "linters": [
+    "ktlint"
+  ],
+  "code_suffixes": [
+    ".java",
+    ".kt"
+  ],
+  "ci_test": [
+    "\\bgradlew?\\b.*\\b(test|check)\\b",
+    "\\bmvn\\b.*\\b(test|verify)\\b"
+  ]
+}

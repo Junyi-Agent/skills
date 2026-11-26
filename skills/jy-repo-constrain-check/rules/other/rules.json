@@ -1,0 +1,22 @@
+{
+  "formatters": [
+    "clang-format",
+    "stylua"
+  ],
+  "linters": [
+    "rubocop"
+  ],
+  "code_suffixes": [
+    ".rb",
+    ".c",
+    ".cc",
+    ".cpp"
+  ],
+  "ci_test": [
+    "\\bdotnet test\\b",
+    "\\brspec\\b"
+  ],
+  "cli_code": [
+    "\\bOptionParser\\b"
+  ]
+}

@@ -1,0 +1,26 @@
+{
+  "skip_dirs": [
+    ".build",
+    "DerivedData",
+    "Pods"
+  ],
+  "formatters": [
+    "swiftformat",
+    "swift[- ]format"
+  ],
+  "linters": [
+    "swiftlint"
+  ],
+  "code_suffixes": [
+    ".swift"
+  ],
+  "ci_test": [
+    "\\bswift test\\b",
+    "\\bxcodebuild\\b.*\\btest(-without-building)?\\b"
+  ],
+  "app_code": [
+    "\\bstruct\\s+\\w+\\s*:\\s*App\\b",
+    "\\bUIApplicationMain\\b",
+    "\\bNSApplicationMain\\b"
+  ]
+}

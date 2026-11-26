@@ -627,5 +627,60 @@ class CliTest(unittest.TestCase):
             self.assertIn("usage:", r.stdout, args)
 
 
+class RulesTest(unittest.TestCase):
+    FIELDS = frozenset({
+        "skip_dirs", "formatters", "linters", "strict", "weak", "weak_in_config", "lint_configs",
+        "code_suffixes", "ci_lint", "ci_test", "cli_code", "app_code",
+    })  # fmt: skip
+
+    def test_every_language_dir_is_loaded(self):
+        dirs = {p.name for p in check.RULES_DIR.iterdir() if p.is_dir()}
+        self.assertEqual(dirs, set(check.LANGS))
+        self.assertEqual(check.LANGS[-1], "common")
+
+    def test_fields_known_and_patterns_compile(self):
+        regex_fields = {
+            "formatters",
+            "linters",
+            "strict",
+            "weak",
+            "ci_lint",
+            "ci_test",
+            "cli_code",
+            "app_code",
+        }
+        for lang in check.LANGS:
+            data = json.loads((check.RULES_DIR / lang / "rules.json").read_text(encoding="utf-8"))
+            self.assertLessEqual(set(data), self.FIELDS, lang)
+            for key in regex_fields & set(data):
+                for pattern in data[key]:
+                    re.compile(pattern)
+            for w in data.get("weak_in_config", []):
+                self.assertEqual(set(w), {"files", "pattern", "why"}, lang)
+                re.compile(w["pattern"])
+
+    def test_merge_keeps_language_order(self):
+        with tempfile.TemporaryDirectory() as d:
+            for lang, configs in (("a", ["x.toml"]), ("b", ["y.toml", "x.toml"])):
+                (Path(d) / lang).mkdir()
+                (Path(d) / lang / "rules.json").write_text(json.dumps({"lint_configs": configs}))
+            self.assertEqual(
+                check.load_rules(Path(d), ["a", "b"]),
+                {"lint_configs": ["x.toml", "y.toml", "x.toml"]},
+            )
+
+    def test_mypy_ignore_errors_only_in_config(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            (root / ".pre-commit-config.yaml").write_text(
+                "repos: [{hooks: [{id: ruff}, {id: black}]}]\n"
+            )
+            (root / "mypy.ini").write_text("[mypy]\nignore_errors = True\n")
+            (root / "tool.py").write_text("shutil.rmtree(p, ignore_errors=True)\n")
+            ev = "\n".join(check.check_fmt_lint(root, []).evidence)
+            self.assertIn("放宽：`mypy.ini:2`", ev)
+            self.assertNotIn("tool.py", ev)
+
+
 if __name__ == "__main__":
     unittest.main()

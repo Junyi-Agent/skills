@@ -1,0 +1,87 @@
+{
+  "skip_dirs": [
+    ".venv",
+    "venv",
+    "__pycache__",
+    ".tox",
+    ".mypy_cache",
+    ".ruff_cache"
+  ],
+  "formatters": [
+    "black",
+    "ruff-format",
+    "ruff format",
+    "isort",
+    "autopep8",
+    "yapf"
+  ],
+  "linters": [
+    "ruff(?![- ]format)",
+    "flake8",
+    "pylint",
+    "mypy",
+    "pyright",
+    "basedpyright"
+  ],
+  "strict": [
+    "typeCheckingMode\\s*[:=]\\s*\\\"?strict",
+    "^\\s*(extend-)?select\\s*=\\s*\\[",
+    "--select[\\\"']?(?:[= ]|,\\s*)[\\\"']?ALL\\b",
+    "disallow_untyped_defs",
+    "warn_unused_ignores",
+    "--exit-non-zero-on-fix"
+  ],
+  "weak": [
+    "--disable-error-code"
+  ],
+  "weak_in_config": [
+    {
+      "files": [
+        "mypy.ini",
+        ".mypy.ini",
+        "setup.cfg",
+        "pyproject.toml"
+      ],
+      "pattern": "(?i)^\\s*ignore_errors\\s*=\\s*true",
+      "why": "mypy 的 ignore_errors = true 只在 mypy 配置里算放宽；代码里是 shutil.rmtree 的参数"
+    }
+  ],
+  "lint_configs": [
+    "pyproject.toml",
+    "ruff.toml",
+    ".ruff.toml",
+    "setup.cfg",
+    "mypy.ini",
+    ".mypy.ini",
+    "pyrightconfig.json",
+    ".flake8",
+    ".pylintrc"
+  ],
+  "code_suffixes": [
+    ".py"
+  ],
+  "ci_lint": [
+    "ruff",
+    "flake8",
+    "mypy",
+    "pyright"
+  ],
+  "ci_test": [
+    "pytest",
+    "unittest",
+    "\\btest_\\w+\\.py\\b",
+    "\\w+_test\\.py\\b",
+    "tox\\b",
+    "nox\\b"
+  ],
+  "cli_code": [
+    "\\bargparse\\b",
+    "\\bimport click\\b",
+    "\\bfrom click\\b",
+    "\\btyper\\b"
+  ],
+  "app_code": [
+    "\\bFlask\\(",
+    "\\bFastAPI\\("
+  ]
+}
