@@ -59,3 +59,5 @@ agent 只有被唤醒才会动。说了「接下来会做 X」就结束这一轮
 ```
 
 已知缺口：承诺的说法靠匹配词判断，会漏判，也会误判。跑一条与 HANDOFF.md 无关的命令（哪怕是只读的）就算开工。这个 hook 只挡住「明显只回复」的情况，派下来的活有没有做完，它管不了。回复发给了谁、该不该 @，它也不查。
+
+改了 `wake_guard.py` 之后，除了单元测试（`scripts/test_wake_guard.py`，CI 会跑），还要在登录了 `claude` CLI 的机器上跑一次端到端检查：`python3 scripts/e2e_wake_guard.py`，三个用例都 PASS 才算完。每个用例都会让 agent 先加载这个 skill，覆盖「加载 skill 后 transcript 多出 isMeta 行」这条路径。2.2.0 的 hook 在这条路径上失效过，当时单元测试和端到端测试都没覆盖到。
