@@ -8,6 +8,7 @@ Agent Skills（SKILL.md 格式）。每个 `skills/jy-*` 目录是一个 skill�
   `git worktree add ../skills-repo-<feature> -b <feature> origin/main`
 - 不在当前目录切换分支（`git checkout <branch>` / `git switch`）。
 - 不在 `main` 上提交，不 push 到 `main`。push feature 分支后开 PR，CI 通过后合并。
+- 只用 squash 合并：`gh pr merge <n> --squash --delete-branch`。合并后用 `git worktree remove` 删掉 worktree，再用 `git branch -D` 删本地分支。squash 后分支不算已合并，`git branch -d` 会拒绝，所以删之前先确认 `gh pr view <n> --json state,headRefOid` 是 MERGED，且 head 等于本地分支的 `git rev-parse <branch>`（相等说明没有未 push 的提交）。别人合并的 PR 也照这样清理，远端分支还在时用 `git push origin --delete <branch>` 删掉。
 - 不用 `--no-verify`、`SKIP=`、`core.hooksPath` 跳过 git hook。
 - 以上规则由 `.claude/hooks/git_guard.py`（PreToolUse hook）强制执行；`gh pr merge` 会先跑 `gh pr checks`，检查没全过就拒绝（[[docs/adr/0003-merge-requires-green-ci]]）。
 
