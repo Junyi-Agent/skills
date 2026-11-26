@@ -165,6 +165,15 @@ class WakeGuardTest(unittest.TestCase):
         rows[-1] = say("无需回复：只是确认。下一步：盘点积压。")
         self.assertEqual(self.check(rows), wake_guard.MESSAGE)
 
+    def test_skill_body_row_is_not_the_prompt(self):
+        # A Skill call adds a user row with isMeta: true holding the skill text (seen in a real
+        # claude -p transcript). It is not a new prompt; the turn is still a wake-up.
+        rows = reply_only()
+        meta = user("Base directory for this skill: /x/jy-wake-up\n\n# 被唤醒时")
+        meta["isMeta"] = True
+        rows[1:1] = [tool("Skill", skill="jy-wake-up"), result(), meta]
+        self.assertEqual(self.check(rows), wake_guard.MESSAGE)
+
     def test_hook_io(self):
         p = write(reply_only())
         self.paths.append(p)
