@@ -1,4 +1,12 @@
 {
+  "detect": {
+    "files": [
+      "go.mod"
+    ],
+    "suffixes": [
+      ".go"
+    ]
+  },
   "skip_dirs": [
     "vendor"
   ],
@@ -37,5 +45,11 @@
   ],
   "app_code": [
     "http\\.ListenAndServe"
+  ],
+  "lib_decl": [
+    [
+      "go.mod",
+      "(?m)^module\\s"
+    ]
   ]
 }

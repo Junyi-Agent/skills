@@ -1,4 +1,25 @@
 {
+  "detect": {
+    "files": [
+      "Gemfile",
+      "pubspec.yaml",
+      "CMakeLists.txt"
+    ],
+    "globs": [
+      "*.csproj",
+      "*.sln"
+    ],
+    "suffixes": [
+      ".rb",
+      ".c",
+      ".cc",
+      ".cpp",
+      ".h",
+      ".hpp",
+      ".cs",
+      ".dart"
+    ]
+  },
   "formatters": [
     "clang-format",
     "stylua"
@@ -18,5 +39,18 @@
   ],
   "cli_code": [
     "\\bOptionParser\\b"
+  ],
+  "app_decl": [
+    [
+      "Gemfile",
+      "\\brails\\b"
+    ],
+    [
+      "pubspec.yaml",
+      "(?m)^\\s*sdk:\\s*flutter\\b"
+    ]
+  ],
+  "app_paths": [
+    "app/views"
   ]
 }

@@ -631,6 +631,7 @@ class RulesTest(unittest.TestCase):
     FIELDS = frozenset({
         "skip_dirs", "formatters", "linters", "strict", "weak", "weak_in_config", "lint_configs",
         "code_suffixes", "ci_lint", "ci_test", "cli_code", "app_code",
+        "detect", "cli_decl", "lib_decl", "app_decl", "app_paths", "app_globs",
     })  # fmt: skip
 
     def test_every_language_dir_is_loaded(self):
@@ -680,6 +681,63 @@ class RulesTest(unittest.TestCase):
             ev = "\n".join(check.check_fmt_lint(root, []).evidence)
             self.assertIn("放宽：`mypy.ini:2`", ev)
             self.assertNotIn("tool.py", ev)
+
+
+class LanguageTest(unittest.TestCase):
+    def tearDown(self):
+        check.use_rules(check.LANGS)
+
+    def repo(self, files: dict[str, str]) -> Path:
+        d = Path(tempfile.mkdtemp())
+        self.addCleanup(lambda: __import__("shutil").rmtree(d))
+        for name, text in files.items():
+            (d / name).parent.mkdir(parents=True, exist_ok=True)
+            (d / name).write_text(text)
+        return d
+
+    def test_detect_each_language(self):
+        cases = {
+            "python": {"pyproject.toml": ""},
+            "javascript": {"src/a.ts": ""},
+            "go": {"go.mod": "module x\n"},
+            "rust": {"Cargo.toml": ""},
+            "swift": {"App.xcodeproj/project.pbxproj": ""},
+            "kotlin": {"build.gradle.kts": ""},
+            "other": {"Gemfile": ""},
+        }
+        for lang, files in cases.items():
+            self.assertEqual(check.detect_languages(self.repo(files)), [lang], lang)
+        self.assertEqual(check.detect_languages(self.repo({"run.sh": "#!/bin/sh\n"})), [])
+
+    def test_rules_of_other_languages_are_off(self):
+        check.use_rules(["go"])
+        self.assertTrue(check.FORMATTERS.search("gofmt"))
+        self.assertTrue(check.LINTERS.search("shellcheck"))  # common stays on
+        self.assertTrue(check.FORMATTERS.search("black"))  # tool names stay on
+        self.assertIn("node_modules", check.SKIP_DIRS)
+        self.assertFalse(check.STRICT.search('"recommended": true'))
+        self.assertEqual(check.WEAK_IN_CONFIG, [])
+
+    def test_output_lists_languages(self):
+        root = self.repo({"go.mod": "module x\n"})
+        out = subprocess.run(
+            [
+                sys.executable,
+                str(Path(check.__file__)),
+                "get",
+                "checks",
+                "3",
+                "--no-remote",
+                "-o",
+                "json",
+                "--repo",
+                str(root),
+            ],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout
+        self.assertEqual(json.loads(out)["languages"], ["go"])
 
 
 if __name__ == "__main__":

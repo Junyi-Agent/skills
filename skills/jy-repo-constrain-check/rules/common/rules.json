@@ -55,5 +55,15 @@
   ],
   "cli_code": [
     "\\bgetopts\\b"
+  ],
+  "app_decl": [
+    [
+      "Dockerfile",
+      "(?m)^\\s*EXPOSE\\s"
+    ],
+    [
+      "Procfile",
+      "(?m)^web:"
+    ]
   ]
 }

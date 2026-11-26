@@ -1,4 +1,15 @@
 {
+  "detect": {
+    "files": [
+      "pyproject.toml",
+      "setup.py",
+      "setup.cfg",
+      "requirements.txt"
+    ],
+    "suffixes": [
+      ".py"
+    ]
+  },
   "skip_dirs": [
     ".venv",
     "venv",
@@ -83,5 +94,39 @@
   "app_code": [
     "\\bFlask\\(",
     "\\bFastAPI\\("
+  ],
+  "cli_decl": [
+    [
+      "pyproject.toml",
+      "(?m)^\\[(project|tool\\.poetry)\\.scripts\\]"
+    ],
+    [
+      "setup.py",
+      "console_scripts"
+    ],
+    [
+      "setup.cfg",
+      "console_scripts"
+    ]
+  ],
+  "lib_decl": [
+    [
+      "pyproject.toml",
+      "(?m)^\\[project\\]|^\\[tool\\.poetry\\]"
+    ],
+    [
+      "setup.py",
+      "setup\\("
+    ]
+  ],
+  "app_decl": [
+    [
+      "pyproject.toml",
+      "(?i)\\b(django|flask|fastapi|streamlit|gradio)\\b"
+    ],
+    [
+      "requirements.txt",
+      "(?im)^(django|flask|fastapi|streamlit|gradio)\\b"
+    ]
   ]
 }
